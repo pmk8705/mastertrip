@@ -1,12 +1,20 @@
 'use strict';
 
 /* ============ 저장소 ============ */
-const STORE_KEY = 'spain-trip-v1';
+const STORE_KEY = 'mastertrip-v1';
+const LEGACY_KEYS = ['spain-trip-v1']; // 이름 변경 전 저장 키. 남아 있으면 옮겨 온다.
 
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) return JSON.parse(raw);
+    for (const k of LEGACY_KEYS) {
+      const old = localStorage.getItem(k);
+      if (!old) continue;
+      localStorage.setItem(STORE_KEY, old);
+      localStorage.removeItem(k);
+      return JSON.parse(old);
+    }
   } catch (e) { console.warn('load failed', e); }
   return seedData();
 }
@@ -147,7 +155,7 @@ function tripPhase() {
 
 function renderHeader() {
   $('#tripTitle').textContent = state.trip.title;
-  document.title = state.trip.title;
+  document.title = `${state.trip.title} · MasterTrip`;
   const p = tripPhase();
   let sub;
   if (p.phase === 'before') sub = `D-${p.dday} · ${fmtDate(state.trip.start, true)} 출국`;
@@ -485,7 +493,7 @@ function exportData() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `spain-trip-backup-${todayStr()}.json`;
+  a.download = `mastertrip-backup-${todayStr()}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();

@@ -1,6 +1,11 @@
-# 스페인 신혼여행 앱 (PWA)
+# MasterTrip Planner
 
-2027.4.5 ~ 4.17 · 세비야 → 그라나다 → 마요르카 → 바르셀로나
+여행 일정·체크리스트·예산·예약을 한곳에서 관리하는 통합 여행 플래너 (PWA)
+
+현재 여행: **스페인 신혼여행** 2027.4.5 ~ 4.17 · 세비야 → 그라나다 → 마요르카 → 바르셀로나
+
+- 웹 주소: https://pmk8705.github.io/mastertrip/
+- 저장소: https://github.com/pmk8705/mastertrip
 
 ## 파일
 | 파일 | 역할 |
@@ -12,15 +17,15 @@
 | `sw.js` | 오프라인 캐시 |
 | `manifest.webmanifest`, `icons/` | 홈 화면 설치용 |
 
-## 폰에 설치하기 (GitHub Pages, 무료)
-1. github.com 가입 → New repository (예: `spain-trip`, Public)
-2. "uploading an existing file" → 이 폴더의 파일 전부(icons 폴더 포함) 드래그해서 업로드 → Commit
-3. Settings → Pages → Branch: `main` / `(root)` → Save
-4. 1~2분 뒤 `https://<아이디>.github.io/spain-trip/` 접속
-5. 홈 화면에 추가
+## PC에서 실행해 보기
+이 폴더에서 명령창을 열고 `python -m http.server 8000` → 브라우저에서 http://localhost:8000
+
+## 폰에 설치하기
+1. 폰에서 위 웹 주소 접속
+2. 홈 화면에 추가
    - 아이폰: **Safari**로 열기 → 공유 버튼 → "홈 화면에 추가"
    - 안드로이드: Chrome → ⋮ 메뉴 → "홈 화면에 추가" (또는 "앱 설치")
-6. 비행기 모드로 켜서 열리는지 확인
+3. 한 번 열었다 닫은 뒤 비행기 모드로 켜서 열리는지 확인
 
 ## 데이터
 - 데이터는 폰 안(localStorage)에만 저장됩니다. 서버로 전송되지 않습니다.
@@ -28,5 +33,6 @@
 - 출국 전에 꼭 한 번 백업해 두세요.
 
 ## 수정 후 다시 배포할 때
-`sw.js`의 `CACHE = 'spain-trip-v1'` 숫자를 올려야 폰에 새 버전이 반영됩니다.
-(앱에서 입력한 데이터는 그대로 유지됩니다.)
+1. `sw.js`의 `CACHE = 'mastertrip-v1'` 숫자를 올립니다 (폰에 새 버전이 반영되도록).
+2. `git add -A` → `git commit -m "변경 내용"` → `git push`
+3. 1~2분 뒤 폰에서 앱을 다시 열면 반영됩니다. 앱에서 입력한 데이터는 그대로 유지됩니다.
