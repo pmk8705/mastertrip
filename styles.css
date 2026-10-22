@@ -359,3 +359,10 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 /* 여행 만들기 폼: 아이콘 칸은 좁게 */
 .emoji-row { grid-template-columns: 72px 1fr; }
 .emoji-row input[name=emoji] { text-align: center; font-size: 20px; padding: 7px 4px; }
+
+/* 여행 폼: 표지 사진 고르기 */
+.cover-pick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cover-thumb {
+  width: 64px; height: 44px; border-radius: 10px; flex: 0 0 auto;
+  background: var(--surface-2) center / cover no-repeat; border: 1px solid var(--line);
+}

@@ -129,6 +129,74 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
 }
 
+/* ============ 여행 표지 사진 (IndexedDB) ============ */
+// 사진은 localStorage(약 5MB)에 넣기엔 커서 IndexedDB에 여행 id별로 Blob으로 저장한다.
+const media = (() => {
+  let dbp;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    const r = indexedDB.open('mastertrip-media', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('covers');
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  }));
+  const run = async (mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('covers', mode);
+      const req = fn(tx.objectStore('covers'));
+      tx.oncomplete = () => res(req && req.result);
+      tx.onerror = () => rej(tx.error);
+    });
+  };
+  return {
+    set: (k, v) => run('readwrite', (st) => st.put(v, k)),
+    del: (k) => run('readwrite', (st) => st.delete(k)),
+    clear: () => run('readwrite', (st) => st.clear()),
+    keys: () => run('readonly', (st) => st.getAllKeys()),
+    values: () => run('readonly', (st) => st.getAll()),
+  };
+})();
+const coverUrls = {}; // 여행 id → 화면에 쓸 사진 주소
+
+async function loadCovers() {
+  try {
+    const [keys, vals] = await Promise.all([media.keys(), media.values()]);
+    keys.forEach((k, i) => { coverUrls[k] = URL.createObjectURL(vals[i]); });
+  } catch (e) { console.warn('사진 불러오기 실패', e); }
+}
+async function setCover(id, blob) {
+  await media.set(id, blob);
+  if (coverUrls[id]) URL.revokeObjectURL(coverUrls[id]);
+  coverUrls[id] = URL.createObjectURL(blob);
+}
+async function removeCover(id) {
+  await media.del(id);
+  if (coverUrls[id]) URL.revokeObjectURL(coverUrls[id]);
+  delete coverUrls[id];
+}
+async function clearCovers() {
+  await media.clear();
+  Object.keys(coverUrls).forEach((k) => { URL.revokeObjectURL(coverUrls[k]); delete coverUrls[k]; });
+}
+
+// 폰 사진(수 MB)을 긴 변 1200px JPEG로 줄인다
+async function shrinkImage(file, max = 1200) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * scale);
+    c.height = Math.round(img.naturalHeight * scale);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.82));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+const blobToDataUrl = (b) => new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(b); });
+
 let state = migrate(loadRaw());
 save();
 // 홈 화면에 설치하지 않은 상태에서도 브라우저가 데이터를 지우지 않도록 요청
@@ -365,6 +433,7 @@ function tripBadge(t) {
 }
 
 function coverStyle(t) {
+  if (coverUrls[t.id]) return `--cover: url('${coverUrls[t.id]}')`;
   let h = 0;
   for (const ch of t.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return `--cover: ${COVER_GRADIENTS[h % COVER_GRADIENTS.length]}`;
@@ -510,6 +579,7 @@ function tripForm(trip) {
           budget: { rate, plan: Object.fromEntries(CATS.map((k) => [k, 0])) },
         });
         state.trips.push(nt);
+        applyCoverChoice(nt.id);
         save();
         openTrip(nt.id);
         toast('여행을 만들었어요');
@@ -522,15 +592,41 @@ function tripForm(trip) {
         trip.days = buildDays(d.start, d.end, trip.days);
       }
       Object.assign(trip, { title: d.title, emoji: d.emoji || '✈️', places: d.places, region: d.region, currency, start: d.start, end: d.end });
+      applyCoverChoice(trip.id);
       trip.budget.rate = rate;
     },
     onDelete: isNew ? null : () => {
       state.trips = state.trips.filter((x) => x !== trip);
+      removeCover(trip.id);
       if (pickedTripId === trip.id) pickTrip(null);
       if (openTripId === trip.id) closeTrip();
     },
     deleteConfirm: `'${t.title}' 여행과 그 안의 일정·체크리스트·지출·예약이 모두 지워집니다. 삭제할까요?`,
   });
+  const has = !isNew && coverUrls[trip.id];
+  $('#modalBody').insertAdjacentHTML('beforeend', `
+    <div class="field"><span>표지 사진 (여행 카드 배경)</span>
+      <div class="cover-pick">
+        <span class="cover-thumb" id="coverThumb" style="${has ? `background-image:url('${coverUrls[trip.id]}')` : ''}"></span>
+        <label class="btn sm">앨범에서 고르기<input type="file" id="coverInput" accept="image/*" hidden></label>
+        ${has ? '<label class="small"><input type="checkbox" id="coverRemove"> 사진 빼기</label>' : ''}
+      </div>
+    </div>`);
+  $('#coverInput').onchange = (ev) => {
+    const f = ev.target.files[0];
+    if (f) $('#coverThumb').style.backgroundImage = `url('${URL.createObjectURL(f)}')`;
+  };
+}
+
+// 여행 폼을 저장할 때 고른 사진을 줄여서 저장 (저장은 비동기라 끝나면 다시 그린다)
+function applyCoverChoice(id) {
+  const file = $('#coverInput') && $('#coverInput').files[0];
+  const remove = $('#coverRemove') && $('#coverRemove').checked;
+  if (file) {
+    shrinkImage(file).then((b) => setCover(id, b)).then(render).catch(() => toast('사진을 불러오지 못했어요'));
+  } else if (remove) {
+    removeCover(id).then(render);
+  }
 }
 
 // 기간에 맞춰 날짜 목록을 만들고, 같은 날짜의 기존 일정은 그대로 가져온다
@@ -887,10 +983,17 @@ function renderSettings() {
 function resetAll() {
   if (!confirm('모든 여행과 수정 내용이 지워지고 처음 상태(스페인 여행 초안)로 돌아갑니다. 계속할까요?')) return;
   state = seedData(); pickTrip(null); openTripId = null; save(); render(); toast('초기화했어요');
+  clearCovers().then(render);
 }
 
-function exportData() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+async function exportData() {
+  // 백업 파일에는 표지 사진도 함께 넣는다 (dataURL)
+  const covers = {};
+  try {
+    const [keys, vals] = await Promise.all([media.keys(), media.values()]);
+    for (let i = 0; i < keys.length; i++) covers[keys[i]] = await blobToDataUrl(vals[i]);
+  } catch (e) { console.warn(e); }
+  const blob = new Blob([JSON.stringify({ ...state, covers }, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `mastertrip-backup-${todayStr()}.json`;
@@ -911,7 +1014,12 @@ function importData(ev) {
       const valid = Array.isArray(data.trips) || (data.trip && Array.isArray(data.days));
       if (!valid) throw new Error('형식 오류');
       if (!confirm('현재 데이터를 백업 파일 내용으로 바꿀까요?')) return;
+      const covers = data.covers || {};
+      delete data.covers;
       state = migrate(data); pickTrip(null); openTripId = null; save(); render(); toast('가져오기 완료');
+      clearCovers()
+        .then(() => Promise.all(Object.entries(covers).map(([id, url]) => fetch(url).then((r) => r.blob()).then((b) => setCover(id, b)))))
+        .then(render);
     } catch (e) {
       toast('올바른 백업 파일이 아니에요');
     }
@@ -992,6 +1100,7 @@ $('#view').addEventListener('change', (ev) => {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
 
 render();
+loadCovers().then(render);
 
 /* ============ 오프라인 (Service Worker) ============ */
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
