@@ -864,7 +864,10 @@ function renderDays(trip) {
   const doneCnt = day.items.filter((i) => i.done).length;
   const costSum = day.items.reduce((sum, i) => sum + (Number(i.cost) || 0), 0);
   const clash = conflictIds(day);
-  const items = day.items.length ? day.items.map((it, i) => timelineItem(trip, it, i, clash.has(it.id))).join('') : '<li class="empty-state">아직 일정이 없어요</li>';
+  const items = day.items.length
+    ? day.items.map((it, i) => (i ? legHtml(day.items[i - 1], it) : '') + timelineItem(trip, it, i, clash.has(it.id))).join('')
+    : '<li class="empty-state">아직 일정이 없어요</li>';
+  const hasLeg = day.items.some((it, i) => i && travelLeg(day.items[i - 1], it));
 
   return `
     <div class="day-strip">${strip}</div>
@@ -887,7 +890,7 @@ function renderDays(trip) {
       <ul class="timeline2">${items}</ul>
     </div>
     <button class="add-btn" data-act="add-item">+ 장소 추가</button>
-    <p class="muted small" style="text-align:center;margin-top:14px">일정을 누르면 수정, 좌우로 밀면 다른 날로 넘어가요.</p>`;
+    <p class="muted small" style="text-align:center;margin-top:14px">일정을 누르면 수정, 좌우로 밀면 다른 날로 넘어가요.${hasLeg ? '<br>이동 시간은 직선거리로 어림잡은 값이에요. 정확한 길은 지도 버튼에서 확인하세요.' : ''}</p>`;
 }
 
 /* ---------- 시간 겹침 ---------- */
@@ -924,6 +927,43 @@ function conflictIds(day) {
     }
   }
   return ids;
+}
+
+/* ---------- 일정 사이 이동 (직선거리 기반 어림값) ---------- */
+// 실제 길찾기는 유료/제한이 있어 2단계에서 바꾸기로 함. 지금은 직선거리 × 1.3 으로 수단·시간을 짐작.
+const ROUTE_FACTOR = 1.3;
+function travelLeg(a, b) {
+  if (!hasPos(a) || !hasPos(b)) return null;
+  const straight = distKm(a, b);
+  const km = straight * (straight * ROUTE_FACTOR > 30 ? 1.15 : ROUTE_FACTOR); // 장거리(기차·고속도로)는 덜 돌아감
+  const round5 = (n) => (n < 10 ? Math.max(1, Math.round(n)) : Math.round(n / 5) * 5);
+  let mode, min = null;
+  if (km <= 2) { mode = '🚶 도보'; min = round5(km / 4.5 * 60); } // 여행 중엔 2km(약 25분)까지는 대개 걸어감
+  else if (km <= 30) { mode = '🚕 차량·대중교통'; min = round5(km / 22 * 60 + 5); }
+  else if (km <= 300) { mode = '🚆 기차·버스'; min = round5(km / 80 * 60 + 15); }
+  else mode = '✈️ 항공';
+  const dist = km < 1 ? `${Math.round(km * 1000 / 10) * 10}m` : `${km < 10 ? km.toFixed(1) : Math.round(km)}km`;
+  return { km, min, mode, dist };
+}
+function fmtMin(n) {
+  if (n < 60) return `${n}분`;
+  const h = Math.floor(n / 60), m = n % 60;
+  return m ? `${h}시간 ${m}분` : `${h}시간`;
+}
+// 두 일정 사이 줄: 이동 수단·시간·거리 + 앞 일정 끝~다음 일정 시작 여유가 모자라면 경고
+function legHtml(a, b) {
+  const leg = travelLeg(a, b);
+  if (!leg || leg.km < 0.05) return '';
+  const ra = itemRange(a), rb = itemRange(b);
+  const gap = ra && rb ? rb.start - ra.end : null;
+  // '이동' 일정이 끼어 있거나 장거리면 그 일정 자체가 이동이라 경고하지 않음 (헛경고 방지)
+  const isMove = a.cat === '이동' || b.cat === '이동';
+  const tight = !isMove && leg.km <= 30 && leg.min != null && gap != null && gap >= 0 && leg.min > gap;
+  return `
+    <li class="tl2-leg ${tight ? 'tight' : ''}">
+      <span class="leg-text">${leg.mode}${leg.min != null ? ` 약 ${fmtMin(leg.min)}` : ''} · ${leg.dist}</span>
+      ${tight ? `<span class="leg-warn">⚠ 이동 시간이 빠듯해요 (여유 ${fmtMin(gap)})</span>` : ''}
+    </li>`;
 }
 
 function timelineItem(trip, it, i, clash) {
