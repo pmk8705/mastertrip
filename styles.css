@@ -89,9 +89,7 @@ main { max-width: 640px; margin: 0 auto; padding: 12px 16px; }
   border: 0; background: none; font-size: 12px; color: var(--muted);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: pointer;
 }
-.tabbar .ti { font-size: 20px; filter: grayscale(1); opacity: .7; }
 .tabbar button.active { color: var(--accent-ink); font-weight: 600; }
-.tabbar button.active .ti { filter: none; opacity: 1; }
 
 /* 공통 카드 */
 .card {
@@ -240,46 +238,114 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 .empty-state { text-align: center; color: var(--muted); padding: 24px 0; font-size: 14px; }
 .notice { background: var(--accent-soft); border-radius: 12px; padding: 10px 12px; font-size: 14px; margin-bottom: 12px; }
 
-/* 상단: 뒤로가기 · 여행 바꾸기 */
+/* 상단: 뒤로가기 */
+.topbar[hidden] { display: none; }
 .top-main { flex: 1; min-width: 0; }
 .topbar h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .back-btn { font-size: 26px; line-height: 1; padding-bottom: 4px; flex: 0 0 auto; }
 .topbar .icon-btn { flex: 0 0 auto; }
-.trip-switch {
-  border: 0; background: none; padding: 0; margin: 0; font: inherit; font-weight: 700; cursor: pointer;
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;
-}
-.trip-switch .caret { color: var(--accent-ink); font-size: 14px; }
 
-/* 홈: 내 여행 */
+/* 홈·내 여행 상단: 노을 배경 + 필기체 로고 (img/header.* 가 생기면 그라데이션 위에 사진을 깐다) */
+.hero {
+  position: relative; height: calc(170px + env(safe-area-inset-top)); padding: 0 20px;
+  display: flex; align-items: flex-end; overflow: hidden;
+  background:
+    linear-gradient(to bottom, rgba(10, 12, 30, .15), rgba(10, 12, 30, .45)),
+    var(--hero-image, linear-gradient(180deg, #1c2847 0%, #4a3657 30%, #b4524a 55%, #f08a3c 68%, #2c3e5c 72%, #1d2c45 100%));
+  background-size: cover; background-position: center;
+}
+.hero[hidden] { display: none; }
+.hero-btn {
+  position: absolute; top: calc(env(safe-area-inset-top) + 14px); right: 14px;
+  border: 0; background: none; color: #fff; width: 42px; height: 42px; border-radius: 50%; cursor: pointer;
+  display: grid; place-items: center;
+}
+.logo {
+  margin: 0 0 34px; color: #fff; white-space: nowrap;
+  font-family: "Dancing Script", "Segoe Script", "Brush Script MT", cursive;
+  font-size: min(40px, 8vw); font-weight: 700; line-height: 1; text-shadow: 0 2px 10px rgba(0, 0, 0, .35);
+}
+.logo-m { color: var(--accent); font-size: 1.4em; }
+
+/* 내 여행 상단 탭 (노을 배경 위로 살짝 겹치는 흰 판) */
+.top-tabs {
+  position: sticky; top: 0; z-index: 9;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  border-radius: 22px 22px 0 0; margin-top: -22px;
+  padding-top: env(safe-area-inset-top);
+}
+.top-tabs[hidden] { display: none; }
+.hero[hidden] + .top-tabs { margin-top: 0; border-radius: 0; }
+.top-tabs button {
+  border: 0; background: none; cursor: pointer; padding: 15px 2px 12px; font-size: 15px; color: var(--muted);
+  border-bottom: 3px solid transparent; white-space: nowrap;
+}
+.top-tabs button.active { color: var(--text); font-weight: 800; border-bottom-color: var(--text); }
+
+/* 하단 탭 아이콘 */
+.tabbar svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; stroke-linecap: round; }
+.tabbar button.active svg { stroke: var(--accent); }
+
+/* 상태 칩 · 새 여행 버튼 */
+.chips-row { display: flex; gap: 8px; overflow-x: auto; margin: 4px -16px 14px; padding: 0 16px; scrollbar-width: none; }
+.chips-row::-webkit-scrollbar { display: none; }
+.chip-f {
+  flex: 0 0 auto; border: 0; border-radius: 99px; padding: 9px 15px; font-size: 14px; cursor: pointer;
+  background: var(--surface-2); color: var(--text); display: inline-flex; align-items: center; gap: 7px;
+}
+.chip-f.active { background: #262626; color: #fff; font-weight: 600; }
+.chip-f .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; display: inline-block; }
 .cta {
-  width: 100%; border: 0; border-radius: var(--radius); padding: 14px; margin-bottom: 12px; cursor: pointer;
-  background: var(--accent); color: var(--on-accent); font-size: 16px; font-weight: 700;
-  box-shadow: var(--shadow);
+  width: 100%; border: 0; border-radius: var(--radius); padding: 15px; margin-bottom: 14px; cursor: pointer;
+  background: var(--accent-soft); color: var(--accent-ink); font-size: 16px; font-weight: 800;
 }
-.chips { flex-wrap: wrap; margin-bottom: 12px; }
-.seg .cnt { opacity: .6; margin-left: 2px; }
-.trip-list { display: flex; flex-direction: column; gap: 10px; }
+.search-box { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
+.search-box input {
+  flex: 1; border: 1px solid var(--line); border-radius: 12px; padding: 11px 14px; background: var(--surface); font-size: 16px;
+}
+
+/* 여행 카드: 사진(없으면 노을빛 그라데이션) + 아래쪽 어둡게 + 흰 글씨 */
+.trip-list { display: flex; flex-direction: column; gap: 14px; }
 .trip-card {
-  display: flex; gap: 12px; align-items: flex-start; width: 100%; text-align: left; cursor: pointer;
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-  box-shadow: var(--shadow); padding: 14px;
+  position: relative; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px;
+  width: 100%; min-height: 172px; padding: 18px 20px; text-align: left; cursor: pointer;
+  border: 0; border-radius: 20px; color: #fff; overflow: hidden;
+  background: linear-gradient(to top, rgba(0, 0, 0, .72), rgba(0, 0, 0, .18) 75%), var(--cover);
+  background-size: cover; background-position: center;
+  box-shadow: 0 4px 14px rgba(40, 20, 0, .18);
 }
-.trip-card.now { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
-.trip-card.past { opacity: .75; }
-.trip-emoji {
-  flex: 0 0 auto; width: 44px; height: 44px; border-radius: 12px; background: var(--accent-soft);
-  display: grid; place-items: center; font-size: 24px;
+.trip-card.past { filter: saturate(.55); }
+.tc-badge { position: absolute; top: 16px; right: 16px; }
+.tc-title { font-size: 22px; font-weight: 800; line-height: 1.25; padding-right: 76px; }
+.tc-title .daytag { font-weight: 800; }
+.tc-date { font-size: 15px; opacity: .92; }
+.tc-route {
+  font-size: 15px; opacity: .95; margin-top: 4px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.trip-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.trip-title { font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.trip-places { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.trip-prep { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-.trip-prep .progress { flex: 1; height: 6px; }
-.badge.now { background: var(--accent); color: var(--on-accent); }
-.badge.soon { background: var(--ok-soft); color: var(--ok-ink); }
-.badge.past { background: var(--surface-2); color: var(--muted); }
-.trip-card .badge { flex: 0 0 auto; }
+.badge.now { background: #D9480F; color: #fff; }
+.badge.soon { background: #2B8A3E; color: #fff; }
+.badge.past { background: rgba(255, 255, 255, .25); color: #fff; }
+.trip-card .badge { font-size: 13px; padding: 4px 12px; }
+
+/* 체크리스트·예산·예약 맨 위: 지금 보고 있는 여행 */
+.trip-switch-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 12px;
+}
+.trip-switch-row .emo { font-size: 24px; }
+.trip-switch-row .grow { flex: 1; min-width: 0; }
+.trip-switch-row .caret { color: var(--accent-ink); font-size: 13px; }
+
+/* 홈: 오늘 */
+.today-list { list-style: none; margin: 0; padding: 0; }
+.today-item { display: flex; align-items: center; gap: 10px; padding: 11px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.today-item:last-child { border-bottom: 0; }
+.today-item .tl-time { min-width: 46px; }
+.today-item .grow { flex: 1; min-width: 0; }
+.today-item.done .grow { text-decoration: line-through; color: var(--muted); }
+.today-item .overdue { color: var(--danger); font-size: 12px; font-weight: 600; }
 
 /* 여행 바꾸기 목록 */
 .pick-row {

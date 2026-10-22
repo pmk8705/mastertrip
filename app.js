@@ -212,12 +212,18 @@ function focusTrip() { return getTrip(pickedTripId) || autoTrip(); }
 function detailTrip() { return getTrip(openTripId); }
 
 /* ============ 라우팅 ============ */
-const TABS = ['trips', 'check', 'budget', 'book'];
-let tab = sessionStorage.getItem('tab');
-if (!TABS.includes(tab)) tab = 'trips';
+// 하단 탭: 홈 | 내 여행 | 기록 | 설정. 내 여행 안의 상단 탭: 내 여행 | 체크리스트 | 예산 | 예약
+const MAIN_TABS = ['home', 'trips', 'records', 'settings'];
+const SUB_TABS = ['trips', 'check', 'budget', 'book'];
+let mainTab = sessionStorage.getItem('main');
+if (!MAIN_TABS.includes(mainTab)) mainTab = 'trips';
+let subTab = sessionStorage.getItem('sub');
+if (!SUB_TABS.includes(subTab)) subTab = 'trips';
 let pickedTripId = sessionStorage.getItem('trip') || null;
 let openTripId = (history.state && history.state.trip) || null; // 여행 상세 화면에 들어가 있으면 그 여행 id
 let tripFilter = { now: true, soon: true, past: false };
+let searchOpen = false;
+let searchQuery = '';
 let selectedDate = null;
 let checkFilter = 'all';
 
@@ -225,11 +231,16 @@ function remember(key, val) {
   try { if (val == null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, val); } catch (e) {}
 }
 
-function setTab(next) {
-  tab = next;
-  remember('tab', tab);
+function setMain(next) {
+  mainTab = next;
+  remember('main', next);
   render();
   window.scrollTo(0, 0);
+}
+function setSub(next) {
+  subTab = next;
+  remember('sub', next);
+  render();
 }
 
 function pickTrip(id) {
@@ -243,7 +254,7 @@ function openTrip(id) {
   selectedDate = null;
   openTripId = id;
   history.pushState({ trip: id }, '');
-  setTab('trips');
+  setMain('trips');
 }
 function closeTrip() {
   if (history.state && history.state.trip) history.back();
@@ -257,25 +268,39 @@ window.addEventListener('popstate', (e) => {
 
 document.querySelectorAll('.tabbar button').forEach((btn) => {
   btn.addEventListener('click', () => {
-    if (btn.dataset.tab === 'trips' && tab === 'trips' && openTripId) return closeTrip();
-    setTab(btn.dataset.tab);
+    if (btn.dataset.main === 'trips' && mainTab === 'trips' && openTripId) return closeTrip();
+    setMain(btn.dataset.main);
   });
 });
+document.querySelectorAll('.top-tabs button').forEach((btn) => {
+  btn.addEventListener('click', () => setSub(btn.dataset.sub));
+});
+
+const inDetail = () => mainTab === 'trips' && !!detailTrip();
 
 function render() {
   if (openTripId && !detailTrip()) openTripId = null;
-  document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  renderHeader();
+  const detail = inDetail();
+  const showHero = !detail && (mainTab === 'home' || mainTab === 'trips');
+  $('#hero').hidden = !showHero;
+  $('#topTabs').hidden = !(mainTab === 'trips' && !detail);
+  $('#topbar').hidden = showHero;
+  document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.main === mainTab));
+  document.querySelectorAll('.top-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.sub === subTab));
+  renderTopbar(detail);
+
   const view = $('#view');
-  if (tab === 'trips') view.innerHTML = detailTrip() ? renderDays(detailTrip()) : renderHome();
+  if (mainTab === 'home') view.innerHTML = renderToday();
+  else if (mainTab === 'records') view.innerHTML = renderRecords();
+  else if (mainTab === 'settings') view.innerHTML = renderSettings();
+  else if (detail) view.innerHTML = renderDays(detailTrip());
+  else if (subTab === 'trips') view.innerHTML = renderTripsList();
   else {
     const t = focusTrip();
     if (!t) view.innerHTML = renderNoTrip();
-    else if (tab === 'check') view.innerHTML = renderCheck(t);
-    else if (tab === 'budget') view.innerHTML = renderBudget(t);
-    else view.innerHTML = renderBook(t);
+    else view.innerHTML = tripSwitchRow(t) + (subTab === 'check' ? renderCheck(t) : subTab === 'budget' ? renderBudget(t) : renderBook(t));
   }
-  if (tab === 'trips' && detailTrip()) {
+  if (detail) {
     const active = $('.chip.active');
     if (active) active.scrollIntoView({ inline: 'center', block: 'nearest' });
   }
@@ -292,80 +317,165 @@ function tripSub(t) {
   return `${fmtRange(t.start, t.end)} · 지난 여행`;
 }
 
-function renderHeader() {
-  const inDetail = tab === 'trips' && detailTrip();
-  $('#backBtn').hidden = !inDetail;
-  $('#tripEditBtn').hidden = !inDetail;
+function renderTopbar(detail) {
+  $('#backBtn').hidden = !detail;
+  $('#tripEditBtn').hidden = !detail;
   const h1 = $('#tripTitle');
   const sub = $('#tripSub');
-
-  if (tab === 'trips' && !inDetail) {
-    h1.textContent = '내 여행';
-    const next = autoTrip();
-    sub.textContent = state.trips.length
-      ? `여행 ${state.trips.length}개${next && phaseOf(next) !== 'past' ? ` · ${next.title} ${phaseOf(next) === 'now' ? '여행 중' : 'D-' + diffDays(next.start, todayStr())}` : ''}`
-      : '첫 여행을 만들어 보세요';
-    document.title = 'MasterTrip Planner';
-    return;
+  document.title = 'MasterTrip Planner';
+  if (detail) {
+    const t = detailTrip();
+    h1.textContent = `${t.emoji} ${t.title}`;
+    sub.textContent = tripSub(t);
+    document.title = `${t.title} · MasterTrip`;
+  } else if (mainTab === 'records') {
+    h1.textContent = '기록';
+    sub.textContent = '여행의 순간을 남기는 곳';
+  } else if (mainTab === 'settings') {
+    h1.textContent = '설정';
+    sub.textContent = '백업 · 데이터 관리';
   }
-
-  const t = inDetail ? detailTrip() : focusTrip();
-  if (!t) { h1.textContent = '여행 없음'; sub.textContent = ''; return; }
-  if (inDetail) h1.textContent = `${t.emoji} ${t.title}`;
-  else h1.innerHTML = `<button class="trip-switch" id="tripSwitch" aria-label="여행 바꾸기">${esc(t.emoji)} ${esc(t.title)} <span class="caret">▾</span></button>`;
-  sub.textContent = tripSub(t);
-  document.title = `${t.title} · MasterTrip`;
 }
 
-/* ============ 홈: 내 여행 ============ */
+// 체크리스트·예산·예약 화면 맨 위: 지금 보고 있는 여행 + 바꾸기
+function tripSwitchRow(t) {
+  return `<button class="trip-switch-row" data-act="switch-trip">
+    <span class="emo">${esc(t.emoji)}</span>
+    <span class="grow"><b>${esc(t.title)}</b> <span class="caret">▾</span><br><span class="muted small">${tripSub(t)}</span></span>
+    ${tripBadge(t)}
+  </button>`;
+}
+
+/* ============ 내 여행 목록 · 홈 ============ */
 const PHASE_LABEL = { now: '현재 여행', soon: '다가오는 여행', past: '지난 여행' };
+// 사진이 없는 여행 카드의 노을빛 배경 (여행마다 하나씩 고정)
+const COVER_GRADIENTS = [
+  'linear-gradient(135deg, #2b3a67 0%, #b5475a 55%, #f2a65a 100%)',
+  'linear-gradient(135deg, #1d3557 0%, #457b9d 50%, #e9c46a 100%)',
+  'linear-gradient(135deg, #3d1e6d 0%, #c2185b 55%, #ff8a65 100%)',
+  'linear-gradient(135deg, #0f3d3e 0%, #2a9d8f 50%, #f4a261 100%)',
+  'linear-gradient(135deg, #22223b 0%, #9a4c95 50%, #f2cc8f 100%)',
+];
 
 function tripBadge(t) {
   const p = phaseOf(t);
   if (p === 'now') return '<span class="badge now">여행 중</span>';
-  if (p === 'soon') {
-    const d = diffDays(t.start, todayStr());
-    return `<span class="badge soon">D-${d}</span>`;
-  }
+  if (p === 'soon') return `<span class="badge soon">D-${diffDays(t.start, todayStr())}</span>`;
   return '<span class="badge past">지난 여행</span>';
 }
 
-function renderHome() {
+function coverStyle(t) {
+  let h = 0;
+  for (const ch of t.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return `--cover: ${COVER_GRADIENTS[h % COVER_GRADIENTS.length]}`;
+}
+
+// 카드 둘째 줄: 여행 중이면 오늘 동선, 다가오는 여행이면 첫 일정들, 아니면 여행지
+function routeLine(t) {
+  const p = phaseOf(t);
+  const titles = (day) => {
+    if (!day || !day.items.length) return '';
+    const names = day.items.slice(0, 3).map((i) => esc(i.title));
+    return names.join(' → ') + (day.items.length > 3 ? ' …' : '');
+  };
+  if (p === 'now') {
+    const r = titles(t.days.find((d) => d.date === todayStr()));
+    if (r) return `오늘 동선: ${r}`;
+  } else if (p === 'soon') {
+    const r = titles(t.days.find((d) => d.items.length));
+    if (r) return r;
+  }
+  return esc(t.places);
+}
+
+function tripCard(t) {
+  const p = phaseOf(t);
+  const dayTag = p === 'now' ? ` <span class="daytag">(Day ${diffDays(todayStr(), t.start) + 1}/${t.days.length})</span>` : '';
+  const route = routeLine(t);
+  return `
+    <button class="trip-card ${p}" data-act="open-trip" data-id="${t.id}" style="${coverStyle(t)}">
+      <span class="tc-badge">${tripBadge(t)}</span>
+      <span class="tc-title">${esc(t.title)}${dayTag}</span>
+      <span class="tc-date">${fmtRange(t.start, t.end)}</span>
+      ${route ? `<span class="tc-route">${route}</span>` : ''}
+    </button>`;
+}
+
+function tripListHtml() {
+  const q = searchQuery.trim().toLowerCase();
+  // 검색 중에는 지난 여행까지 모두 찾는다
+  const list = sortTrips(state.trips.filter((t) => (q
+    ? `${t.title} ${t.places}`.toLowerCase().includes(q)
+    : tripFilter[phaseOf(t)])));
+  if (list.length) return list.map(tripCard).join('');
+  if (!state.trips.length) return '<div class="empty-state">아직 여행이 없어요.<br>위 버튼으로 첫 여행을 만들어 보세요.</div>';
+  return `<div class="empty-state">${q ? '검색 결과가 없어요' : '이 조건에 맞는 여행이 없어요'}</div>`;
+}
+
+function renderTripsList() {
   const counts = { now: 0, soon: 0, past: 0 };
   state.trips.forEach((t) => counts[phaseOf(t)]++);
-  const list = sortTrips(state.trips.filter((t) => tripFilter[phaseOf(t)]));
-
   const chips = Object.keys(PHASE_LABEL).map((p) => `
-    <button class="seg ${tripFilter[p] ? 'active' : ''}" data-act="trip-filter" data-v="${p}">${PHASE_LABEL[p]} <span class="cnt">${counts[p]}</span></button>`).join('');
-
-  const cards = list.map((t) => {
-    const done = t.checklist.filter((c) => c.done).length;
-    const total = t.checklist.length;
-    const pct = total ? Math.round((done / total) * 100) : 0;
-    return `
-    <button class="trip-card ${phaseOf(t)}" data-act="open-trip" data-id="${t.id}">
-      <span class="trip-emoji">${esc(t.emoji)}</span>
-      <span class="trip-main">
-        <span class="row"><b class="trip-title">${esc(t.title)}</b><span class="spacer"></span>${tripBadge(t)}</span>
-        <span class="muted small">${fmtRange(t.start, t.end)}</span>
-        ${t.places ? `<span class="trip-places small">${esc(t.places)}</span>` : ''}
-        ${total ? `<span class="trip-prep"><span class="progress"><i style="width:${pct}%"></i></span><span class="muted small">준비 ${pct}%</span></span>` : ''}
-      </span>
-    </button>`;
-  }).join('');
-
-  let empty = '';
-  if (!state.trips.length) empty = '<div class="empty-state">아직 여행이 없어요.<br>위 버튼으로 첫 여행을 만들어 보세요.</div>';
-  else if (!list.length) empty = '<div class="empty-state">이 조건에 맞는 여행이 없어요</div>';
-
+    <button class="chip-f ${tripFilter[p] ? 'active' : ''}" data-act="trip-filter" data-v="${p}">${tripFilter[p] ? '<i class="dot"></i>' : ''}${PHASE_LABEL[p]} (${counts[p]})</button>`).join('');
+  const search = searchOpen ? `
+    <div class="search-box">
+      <input id="searchInput" type="search" placeholder="여행 이름·도시 검색" value="${esc(searchQuery)}" autocomplete="off">
+      <button class="more-btn" data-act="search-close" aria-label="검색 닫기">✕</button>
+    </div>` : '';
   return `
+    ${search}
+    <div class="chips-row">${chips}</div>
     <button class="cta" data-act="new-trip">+ 새로운 여행 일정 만들기</button>
-    <div class="filter-row chips">${chips}</div>
-    <div class="trip-list">${cards}${empty}</div>`;
+    <div class="trip-list" id="tripList">${tripListHtml()}</div>`;
 }
 
 function renderNoTrip() {
   return `<div class="empty-state">아직 여행이 없어요.<br><br><button class="btn primary" data-act="new-trip">+ 새 여행 만들기</button></div>`;
+}
+
+// 홈: 지금(또는 다음) 여행의 오늘 할 일을 한눈에
+function renderToday() {
+  const t = autoTrip();
+  if (!t) return renderNoTrip();
+  const p = phaseOf(t);
+  const today = todayStr();
+  let html = `<div class="section-title"><h3>${p === 'now' ? '지금 여행 중' : p === 'soon' ? '다음 여행' : '최근 여행'}</h3></div>${tripCard(t)}`;
+
+  if (p === 'now') {
+    const day = t.days.find((d) => d.date === today);
+    const items = day && day.items.length ? day.items.map((it) => `
+      <li class="today-item ${it.done ? 'done' : ''}" data-act="open-trip" data-id="${t.id}">
+        <span class="tl-time">${esc(it.time || '·')}</span><span class="grow">${esc(it.title)}</span>${it.done ? '✓' : ''}
+      </li>`).join('') : '<li class="empty-state">오늘 일정이 없어요</li>';
+    const spent = t.expenses.filter((e) => e.date === today).reduce((s, e) => s + toKRW(t, e), 0);
+    html += `
+      <div class="section-title"><h3>오늘 일정${day && day.city ? ' · ' + esc(day.city) : ''}</h3></div>
+      <div class="card" style="padding:4px 14px"><ul class="today-list">${items}</ul></div>
+      <div class="card row"><span>오늘 지출</span><span class="spacer"></span><b class="num">${won(spent)}</b>
+        <button class="btn sm" data-act="goto-sub" data-v="budget" data-id="${t.id}">기록하기</button></div>`;
+  } else if (p === 'soon') {
+    const all = t.checklist;
+    const done = all.filter((c) => c.done).length;
+    const pct = all.length ? Math.round((done / all.length) * 100) : 0;
+    const todo = all.filter((c) => !c.done).sort((a, b) => (b.due ?? -1) - (a.due ?? -1)).slice(0, 4);
+    html += `
+      <div class="section-title"><h3>준비할 일</h3><span class="muted small">${done}/${all.length} · ${pct}%</span></div>
+      <div class="card" style="padding:4px 14px"><ul class="today-list">${todo.map((c) => `
+        <li class="today-item" data-act="goto-sub" data-v="check" data-id="${t.id}">
+          <span class="grow">${esc(c.text)}</span>${isOverdue(t, c) ? '<span class="overdue">기한 지남</span>' : ''}
+        </li>`).join('') || '<li class="empty-state">준비 끝! 즐거운 여행 되세요</li>'}</ul></div>
+      <button class="add-btn" data-act="goto-sub" data-v="check" data-id="${t.id}">체크리스트 전체 보기</button>`;
+  }
+  return html;
+}
+
+function renderRecords() {
+  return `
+    <div class="card" style="text-align:center;padding:28px 18px">
+      <div style="font-size:40px">📝</div>
+      <h3 style="margin:8px 0 6px">기록은 준비 중이에요</h3>
+      <p class="muted small" style="margin:0">여행 일기, 사진 모음, 다녀온 곳 지도 같은 기능이 들어올 자리예요.</p>
+    </div>`;
 }
 
 function tripForm(trip) {
@@ -756,23 +866,27 @@ function contactForm(trip, c) {
 }
 
 /* ============ 설정 · 백업 ============ */
-function settingsForm() {
-  openModal({
-    title: '설정',
-    html: `
+function renderSettings() {
+  return `
+    <div class="section-title"><h3>백업</h3></div>
+    <div class="card">
       <p class="small muted" style="margin-top:0">데이터는 이 폰 안에만 저장돼요. 폰을 바꾸거나 브라우저 데이터를 지우면 사라지니 가끔 내보내기로 백업하세요. 백업에는 모든 여행이 들어갑니다.</p>
-      <div class="row" style="flex-wrap:wrap;margin-bottom:14px">
-        <button type="button" class="btn" id="exportBtn">⬇ 내보내기 (백업)</button>
+      <div class="row" style="flex-wrap:wrap">
+        <button type="button" class="btn" data-act="export">⬇ 내보내기 (백업)</button>
         <label class="btn" style="display:inline-block">⬆ 가져오기 <input type="file" id="importInput" accept="application/json,.json" hidden></label>
       </div>
-      <button type="button" class="btn danger" id="resetBtn" style="padding-left:0">처음 상태로 초기화</button>`,
-  });
-  $('#exportBtn').onclick = exportData;
-  $('#importInput').onchange = importData;
-  $('#resetBtn').onclick = () => {
-    if (!confirm('모든 여행과 수정 내용이 지워지고 처음 상태(스페인 여행 초안)로 돌아갑니다. 계속할까요?')) return;
-    state = seedData(); pickTrip(null); openTripId = null; save(); modal.close(); render(); toast('초기화했어요');
-  };
+    </div>
+    <div class="section-title"><h3>데이터</h3></div>
+    <div class="card">
+      <p class="small muted" style="margin-top:0">모든 여행을 지우고 처음 상태(스페인 여행 초안)로 돌아갑니다.</p>
+      <button type="button" class="btn danger" data-act="reset" style="padding-left:0">처음 상태로 초기화</button>
+    </div>
+    <p class="muted small" style="text-align:center">MasterTrip Planner</p>`;
+}
+
+function resetAll() {
+  if (!confirm('모든 여행과 수정 내용이 지워지고 처음 상태(스페인 여행 초안)로 돌아갑니다. 계속할까요?')) return;
+  state = seedData(); pickTrip(null); openTripId = null; save(); render(); toast('초기화했어요');
 }
 
 function exportData() {
@@ -797,7 +911,7 @@ function importData(ev) {
       const valid = Array.isArray(data.trips) || (data.trip && Array.isArray(data.days));
       if (!valid) throw new Error('형식 오류');
       if (!confirm('현재 데이터를 백업 파일 내용으로 바꿀까요?')) return;
-      state = migrate(data); pickTrip(null); openTripId = null; save(); modal.close(); render(); toast('가져오기 완료');
+      state = migrate(data); pickTrip(null); openTripId = null; save(); render(); toast('가져오기 완료');
     } catch (e) {
       toast('올바른 백업 파일이 아니에요');
     }
@@ -806,10 +920,15 @@ function importData(ev) {
 }
 
 /* ============ 이벤트 위임 ============ */
-$('#settingsBtn').addEventListener('click', settingsForm);
 $('#backBtn').addEventListener('click', closeTrip);
 $('#tripEditBtn').addEventListener('click', () => { const t = detailTrip(); if (t) tripForm(t); });
-$('.topbar').addEventListener('click', (ev) => { if (ev.target.closest('#tripSwitch')) tripPicker(); });
+$('#searchBtn').addEventListener('click', () => {
+  searchOpen = true;
+  mainTab = 'trips'; remember('main', mainTab);
+  setSub('trips');
+  const input = $('#searchInput');
+  if (input) input.focus();
+});
 
 $('#view').addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-act]');
@@ -822,6 +941,11 @@ $('#view').addEventListener('click', (ev) => {
 
   switch (act) {
     case 'new-trip': tripForm(null); break;
+    case 'switch-trip': tripPicker(); break;
+    case 'search-close': searchOpen = false; searchQuery = ''; render(); break;
+    case 'goto-sub': pickTrip(id); mainTab = 'trips'; remember('main', mainTab); setSub(el.dataset.v); window.scrollTo(0, 0); break;
+    case 'export': exportData(); break;
+    case 'reset': resetAll(); break;
     case 'open-trip': openTrip(id); break;
     case 'trip-filter': tripFilter[el.dataset.v] = !tripFilter[el.dataset.v]; render(); break;
     case 'pick-day': selectedDate = el.dataset.date; render(); break;
@@ -848,8 +972,15 @@ $('#view').addEventListener('click', (ev) => {
   }
 });
 
+$('#view').addEventListener('input', (ev) => {
+  if (ev.target.id !== 'searchInput') return;
+  searchQuery = ev.target.value;
+  $('#tripList').innerHTML = tripListHtml(); // 목록만 다시 그려서 입력창 포커스를 유지
+});
+
 $('#view').addEventListener('change', (ev) => {
   const el = ev.target;
+  if (el.id === 'importInput') return importData(ev);
   if (el.dataset.act !== 'toggle-check') return;
   const c = focusTrip().checklist.find((x) => x.id === el.dataset.id);
   c.done = el.checked;
