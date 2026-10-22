@@ -428,3 +428,45 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
   .modal-actions { position: sticky; bottom: calc(-18px - env(safe-area-inset-bottom)); background: var(--surface); padding: 10px 0 4px; }
 }
 @keyframes sheet-up { from { transform: translateY(40%); opacity: .5; } to { transform: none; opacity: 1; } }
+
+/* 지도 (여행 상세 위쪽) */
+.map-wrap { position: relative; margin-bottom: 12px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); }
+#map { height: 36vh; min-height: 190px; max-height: 320px; background: var(--surface-2); }
+.map-wrap.closed #map { display: none; }
+.map-wrap.closed { border: 0; }
+.map-wrap.closed .map-toggle { position: static; width: 100%; }
+.map-toggle {
+  position: absolute; right: 8px; top: 8px; z-index: 500; border: 0; cursor: pointer;
+  background: var(--surface); color: var(--text); padding: 6px 12px; border-radius: 99px; font-size: 13px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
+}
+.map-note { text-align: center; color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+.pin span {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--cat, var(--accent)); color: #fff; font-weight: 800; font-size: 14px;
+  border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+}
+.leaflet-container { font: inherit; }
+
+/* 타임라인 번호 · 지도 웹 버튼 */
+.tl2-dot { position: relative; }
+.tl2-num {
+  position: absolute; right: -5px; bottom: -5px; min-width: 17px; height: 17px; padding: 0 3px; border-radius: 99px;
+  background: var(--cat); color: #fff; font-size: 11px; font-weight: 800; line-height: 17px; text-align: center;
+  border: 2px solid var(--surface);
+}
+.tl2-place { font-size: 13px; color: var(--muted); }
+.map-btn {
+  margin-left: auto; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap;
+  padding: 5px 10px; border-radius: 99px; background: var(--surface-2); color: var(--text);
+}
+
+/* 장소 검색 */
+.search-row { display: flex; gap: 6px; }
+.search-row input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--bg); font-size: 16px; }
+.place-status { margin-top: 6px; }
+.place-hit {
+  display: block; width: 100%; text-align: left; cursor: pointer; margin-top: 6px;
+  border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 8px 10px;
+}
+.place-hit b { display: block; }

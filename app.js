@@ -149,7 +149,6 @@ function money(n, cur) {
   const v = (Math.round(n * 100) / 100).toLocaleString('ko-KR');
   return SYMBOLS[cur] ? SYMBOLS[cur] + v : `${v} ${cur}`;
 }
-function mapUrl(place) { return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(place); }
 const isHHMM = (t) => /^\d{1,2}:\d{2}$/.test(t || '');
 const hhmm = (t) => t.padStart(5, '0');
 
@@ -390,6 +389,7 @@ function render() {
   document.querySelectorAll('.top-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.sub === subTab));
   renderTopbar(detail);
 
+  if (leafletMap) { leafletMap.remove(); leafletMap = null; }
   const view = $('#view');
   const oldStrip = $('.day-strip');
   const stripLeft = oldStrip ? oldStrip.scrollLeft : 0; // 다시 그려도 날짜 줄 위치를 유지
@@ -403,7 +403,10 @@ function render() {
     if (!t) view.innerHTML = renderNoTrip();
     else view.innerHTML = tripSwitchRow(t) + (subTab === 'check' ? renderCheck(t) : subTab === 'budget' ? renderBudget(t) : renderBook(t));
   }
-  if (detail) centerActiveChip(stripLeft);
+  if (detail) {
+    centerActiveChip(stripLeft);
+    mountMap(detailTrip(), currentDay());
+  }
 }
 
 // 고른 날짜 버튼을 날짜 줄 가운데로. scrollIntoView는 페이지 전체까지 움직여서 화면이 흔들리므로 줄만 움직인다.
@@ -697,6 +700,145 @@ function tripPicker() {
   });
 }
 
+/* ============ 지도 · 장소 검색 ============ */
+// 지도 그림: OpenStreetMap 타일 + Leaflet (vendor/leaflet). 장소 검색: OpenStreetMap Nominatim.
+// Nominatim 규칙: 1초에 1번까지, 글자 칠 때마다 자동 검색 금지(버튼으로만 검색), 출처 표시.
+let leafletMap = null;
+let mapOpen = sessionStorage.getItem('map') !== '0';
+let geocoding = false;
+const hasPos = (it) => typeof it.lat === 'number' && typeof it.lng === 'number';
+
+// 국내 여행은 네이버 지도, 해외는 구글 지도 웹사이트로 (앱이 없어도 열림)
+function mapLink(trip, it) {
+  const q = it.place || (hasPos(it) ? `${it.lat},${it.lng}` : '');
+  if (!q) return null;
+  if (trip.region === '국내') return { url: `https://m.map.naver.com/search?query=${encodeURIComponent(q)}`, label: '🟢 네이버 지도로 보기 ›' }; // map.naver.com은 폰에서 '앱으로 열기' 페이지로 넘어가므로 모바일 웹 주소
+  return { url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`, label: '📍 구글 지도로 보기 ›' };
+}
+
+// 이미 위치를 찾은 일정들의 중앙값 (같은 이름의 먼 나라 장소를 거르는 기준). 3곳 이상일 때만.
+function tripCenter(trip) {
+  const pts = trip.days.flatMap((d) => d.items.filter(hasPos));
+  if (pts.length < 3) return null;
+  const mid = (arr) => { const a = [...arr].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
+  return { lat: mid(pts.map((p) => p.lat)), lng: mid(pts.map((p) => p.lng)) };
+}
+// 그날 이미 위치가 있는 일정들의 중앙 (없으면 여행 전체 기준)
+function dayCenter(trip, day) {
+  const pts = day.items.filter(hasPos);
+  if (!pts.length) return tripCenter(trip);
+  const mid = (arr) => { const a = [...arr].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
+  return { lat: mid(pts.map((p) => p.lat)), lng: mid(pts.map((p) => p.lng)) };
+}
+function distKm(a, b) {
+  const R = 6371, rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad, dLng = (b.lng - a.lng) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+const FAR_KM = 1500;
+
+let lastGeo = 0;
+async function geocode(q, limit = 5, near = null) {
+  const wait = lastGeo + 1100 - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastGeo = Date.now();
+  // near가 있으면 그 주변(약 ±4도)을 우선 (제외하지는 않음)
+  const bias = near ? `&viewbox=${near.lng - 4},${near.lat + 4},${near.lng + 4},${near.lat - 4}` : '';
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&accept-language=ko${bias}&q=${encodeURIComponent(q)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('geocode ' + res.status);
+  return (await res.json()).map((r) => ({
+    name: r.name || r.display_name.split(',')[0],
+    addr: r.display_name,
+    lat: Number(r.lat),
+    lng: Number(r.lon),
+  }));
+}
+
+// "세비야 → 그라나다" 같은 도시 칸의 도시들 (검색 정확도 보정용)
+const dayCities = (day) => String(day.city || '').split('→').map((x) => x.trim()).filter((x) => x && !/출국|도착|귀국/.test(x));
+const firstCity = (day) => dayCities(day)[0] || '';
+
+// 장소 하나의 위치 찾기: 그대로 → (멀거나 없으면) 그날 도시 이름을 붙여서
+async function findPlace(trip, day, place) {
+  const near = tripCenter(trip);
+  const okHit = (h) => h && (!near || distKm(h, near) < FAR_KM);
+  const [first] = await geocode(place, 1, dayCenter(trip, day));
+  if (okHit(first)) return first;
+  for (const city of dayCities(day)) {
+    if (place.includes(city)) continue;
+    const [h] = await geocode(`${place}, ${city}`, 1, near);
+    if (okHit(h)) return h;
+  }
+  return null;
+}
+
+function missingPlaces(trip) {
+  const out = [];
+  for (const d of trip.days) for (const it of d.items) if (it.place && !hasPos(it) && it.geo !== 'fail') out.push([d, it]);
+  return out;
+}
+
+// 장소 글자만 있고 위치가 없는 일정들의 위치를 한 번에 찾는다 (1초에 1곳)
+async function geocodeAll(trip) {
+  if (geocoding) return;
+  if (!navigator.onLine) return toast('인터넷 연결이 필요해요');
+  const todo = missingPlaces(trip);
+  if (!todo.length) return;
+  geocoding = true;
+  let ok = 0;
+  try {
+    for (let i = 0; i < todo.length; i++) {
+      const [day, it] = todo[i];
+      toast(`장소 위치 찾는 중 ${i + 1}/${todo.length}`);
+      const hit = await findPlace(trip, day, it.place);
+      if (hit) { it.lat = hit.lat; it.lng = hit.lng; delete it.geo; ok++; } else it.geo = 'fail';
+      if (i % 5 === 4) save();
+    }
+  } catch (e) {
+    toast('검색이 잠시 막혔어요. 조금 뒤에 다시 해보세요');
+  } finally {
+    geocoding = false;
+    save();
+    render();
+  }
+  const fail = todo.length - ok;
+  setTimeout(() => toast(`위치 ${ok}곳 찾음${fail ? ` · ${fail}곳은 일정을 눌러 직접 검색해 주세요` : ''}`), 1900);
+}
+
+function mapSection(trip, day) {
+  const missing = missingPlaces(trip).length;
+  const fix = missing ? `<button class="btn sm" data-act="geocode-all">📍 장소 위치 자동 찾기 (${missing}곳)</button>` : '';
+  if (!navigator.onLine) return '<div class="map-note">오프라인이라 지도는 숨겼어요. 일정은 아래에서 볼 수 있어요.</div>';
+  if (!day.items.some(hasPos)) return fix ? `<div class="map-note">${fix}</div>` : '';
+  return `
+    <div class="map-wrap ${mapOpen ? '' : 'closed'}">
+      <div id="map"></div>
+      <button class="map-toggle" data-act="toggle-map">${mapOpen ? '지도 접기 ▲' : '지도 펼치기 ▼'}</button>
+    </div>
+    ${fix ? `<div class="map-note">${fix}</div>` : ''}`;
+}
+
+// 그날 일정 중 위치가 있는 곳에 번호 핀(타임라인 번호와 같음) + 방문 순서대로 점선
+function mountMap(trip, day) {
+  const el = $('#map');
+  if (!el || !mapOpen || typeof L === 'undefined') return;
+  leafletMap = L.map(el, { zoomControl: false });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(leafletMap);
+  const pts = [];
+  day.items.forEach((it, i) => {
+    if (!hasPos(it)) return;
+    const c = ITEM_CATS[it.cat] || ITEM_CATS['기타'];
+    const icon = L.divIcon({ className: 'pin', html: `<span style="--cat:${c.color}">${i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] });
+    L.marker([it.lat, it.lng], { icon }).addTo(leafletMap).bindPopup(`<b>${esc(it.title)}</b>${it.time ? '<br>' + esc(it.time) : ''}`);
+    pts.push([it.lat, it.lng]);
+  });
+  if (pts.length > 1) L.polyline(pts, { color: '#FF7A00', weight: 3, opacity: 0.9, dashArray: '6 6' }).addTo(leafletMap);
+  if (pts.length === 1) leafletMap.setView(pts[0], 15);
+  else leafletMap.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
+}
+
 /* ============ 일정 (여행 상세) ============ */
 function renderDays(trip) {
   if (!trip.days.length) return '<div class="empty-state">날짜가 없어요. ✎ 버튼으로 기간을 확인하세요.</div>';
@@ -719,10 +861,11 @@ function renderDays(trip) {
   const day = trip.days[idx];
   const doneCnt = day.items.filter((i) => i.done).length;
   const costSum = day.items.reduce((sum, i) => sum + (Number(i.cost) || 0), 0);
-  const items = day.items.length ? day.items.map((it) => timelineItem(trip, it)).join('') : '<li class="empty-state">아직 일정이 없어요</li>';
+  const items = day.items.length ? day.items.map((it, i) => timelineItem(trip, it, i)).join('') : '<li class="empty-state">아직 일정이 없어요</li>';
 
   return `
     <div class="day-strip">${strip}</div>
+    ${mapSection(trip, day)}
     <div class="card day-card" id="dayCard">
       <div class="day-head row">
         <div>
@@ -740,15 +883,17 @@ function renderDays(trip) {
     <p class="muted small" style="text-align:center;margin-top:14px">일정을 누르면 수정, 좌우로 밀면 다른 날로 넘어가요.</p>`;
 }
 
-function timelineItem(trip, it) {
+function timelineItem(trip, it, i) {
   const c = ITEM_CATS[it.cat] || ITEM_CATS['기타'];
   const when = [it.time, it.dur].filter(Boolean).join(' · ');
   const cost = Number(it.cost) || 0;
-  const foot = (it.place ? `<a class="map-link" href="${mapUrl(it.place)}" target="_blank" rel="noopener" data-act="link">📍 ${esc(it.place)}</a>` : '')
-    + (cost ? `<span class="tl2-cost">💰 ${money(cost, trip.currency)}</span>` : '');
+  const link = mapLink(trip, it);
+  const foot = (it.place ? `<span class="tl2-place">${hasPos(it) ? '📍' : '◌'} ${esc(it.place)}</span>` : '')
+    + (cost ? `<span class="tl2-cost">💰 ${money(cost, trip.currency)}</span>` : '')
+    + (link ? `<a class="map-btn" href="${link.url}" target="_blank" rel="noopener" data-act="link">${link.label}</a>` : '');
   return `
     <li class="tl2 ${it.done ? 'done' : ''}" style="--cat:${c.color}">
-      <span class="tl2-dot" title="${esc(it.cat)}">${c.icon}</span>
+      <span class="tl2-dot" title="${esc(it.cat)}">${c.icon}<span class="tl2-num">${i + 1}</span></span>
       <div class="tl2-card" data-act="edit-item" data-id="${it.id}">
         <div class="tl2-top">
           <span class="tl2-time">${esc(when || it.cat)}</span><span class="spacer"></span>
@@ -803,7 +948,16 @@ function itemForm(item) {
     title: isNew ? '장소 추가' : '일정 수정',
     html: `
       <div class="field"><span>날짜</span><div class="pick-scroll">${dayChips}</div></div>
-      ${fieldHtml({ name: 'place', label: '🔍 장소 (구글 지도 검색어)', value: item.place, placeholder: '예: Sagrada Família' })}
+      <div class="field"><span>🔍 장소 검색</span>
+        <div class="search-row">
+          <input name="place" value="${esc(item.place)}" placeholder="예: Sagrada Família" autocomplete="off">
+          <button type="button" class="btn sm" id="placeSearchBtn">검색</button>
+        </div>
+        <input type="hidden" name="lat" value="${hasPos(item) ? item.lat : ''}">
+        <input type="hidden" name="lng" value="${hasPos(item) ? item.lng : ''}">
+        <div id="placeStatus" class="small muted place-status">${hasPos(item) ? '📍 위치 저장됨 (지도에 표시돼요)' : '검색해서 후보를 고르면 지도에 표시돼요'}</div>
+        <div id="placeResults"></div>
+      </div>
       ${fieldHtml({ name: 'title', label: '이름 / 할 일', value: item.title, required: true, placeholder: '예: 사그라다 파밀리아 관람' })}
       <div class="field-row">
         ${fieldHtml({ name: 'time', label: '⏰ 방문 시간', value: item.time, placeholder: '예: 09:30, 오전' })}
@@ -818,6 +972,8 @@ function itemForm(item) {
         time: d.time, dur: d.dur, title: d.title, place: d.place, memo: d.memo,
         cat: d.cat || '기타', cost: cost > 0 ? cost : '',
       });
+      if (d.lat !== '' && d.lng !== '') { item.lat = Number(d.lat); item.lng = Number(d.lng); delete item.geo; }
+      else { delete item.lat; delete item.lng; delete item.geo; }
       const target = trip.days.find((x) => x.date === d.date) || curDay;
       if (target !== curDay) {
         curDay.items = curDay.items.filter((x) => x !== item);
@@ -830,6 +986,46 @@ function itemForm(item) {
   });
   const checked = $('#modalBody input[name=date]:checked');
   if (checked) checked.parentElement.scrollIntoView({ inline: 'center', block: 'nearest' });
+  wirePlaceSearch(curDay);
+}
+
+function wirePlaceSearch(day) {
+  const form = $('#modalForm');
+  const input = form.place;
+  const status = $('#placeStatus');
+  const results = $('#placeResults');
+  const setPos = (lat, lng) => { form.lat.value = lat; form.lng.value = lng; };
+  const search = async () => {
+    const q = input.value.trim();
+    if (!q) return;
+    if (!navigator.onLine) { status.textContent = '인터넷 연결이 필요해요'; return; }
+    status.textContent = '검색 중…';
+    results.innerHTML = '';
+    try {
+      const near = dayCenter(detailTrip(), day);
+      let hits = await geocode(q, 5, near);
+      if (!hits.length && firstCity(day) && !q.includes(firstCity(day))) hits = await geocode(`${q}, ${firstCity(day)}`, 5, near);
+      if (near) hits.sort((a, b) => distKm(a, near) - distKm(b, near)); // 여행 지역에 가까운 후보부터
+      status.textContent = hits.length ? '맞는 곳을 고르세요' : '찾지 못했어요. 영어 이름이나 도시 이름을 붙여 보세요 (예: Alhambra, Granada)';
+      results.innerHTML = hits.map((h, i) => `
+        <button type="button" class="place-hit" data-i="${i}"><b>${esc(h.name)}</b><span class="muted small">${esc(h.addr)}</span></button>`).join('');
+      results.querySelectorAll('.place-hit').forEach((b) => {
+        b.onclick = () => {
+          const h = hits[Number(b.dataset.i)];
+          input.value = h.name;
+          setPos(h.lat, h.lng);
+          if (!form.title.value.trim()) form.title.value = h.name;
+          status.textContent = `📍 ${h.addr}`;
+          results.innerHTML = '';
+        };
+      });
+    } catch (e) {
+      status.textContent = '검색이 잠시 막혔어요. 조금 뒤에 다시 해보세요';
+    }
+  };
+  $('#placeSearchBtn').onclick = search;
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); search(); } });
+  input.addEventListener('input', () => { setPos('', ''); status.textContent = '검색해서 후보를 고르면 지도에 표시돼요'; });
 }
 
 /* ============ 체크리스트 ============ */
@@ -1155,6 +1351,8 @@ $('#view').addEventListener('click', (ev) => {
   switch (act) {
     case 'new-trip': tripForm(null); break;
     case 'switch-trip': tripPicker(); break;
+    case 'toggle-map': mapOpen = !mapOpen; remember('map', mapOpen ? '1' : '0'); render(); break;
+    case 'geocode-all': geocodeAll(detailTrip()); break;
     case 'search-close': searchOpen = false; searchQuery = ''; render(); break;
     case 'goto-sub': pickTrip(id); mainTab = 'trips'; remember('main', mainTab); setSub(el.dataset.v); window.scrollTo(0, 0); break;
     case 'export': exportData(); break;
@@ -1216,6 +1414,10 @@ $('#view').addEventListener('touchend', (ev) => {
   if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx) * 0.6) return; // 세로 스크롤은 무시
   stepDay(dx < 0 ? 1 : -1);
 }, { passive: true });
+
+// 인터넷이 끊기거나 다시 연결되면 지도 표시를 바꾼다
+window.addEventListener('online', () => { if (inDetail()) render(); });
+window.addEventListener('offline', () => { if (inDetail()) render(); });
 
 // 자정이 지나면 오늘 날짜/D-day 갱신
 document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
