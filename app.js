@@ -391,6 +391,8 @@ function render() {
   renderTopbar(detail);
 
   const view = $('#view');
+  const oldStrip = $('.day-strip');
+  const stripLeft = oldStrip ? oldStrip.scrollLeft : 0; // 다시 그려도 날짜 줄 위치를 유지
   if (mainTab === 'home') view.innerHTML = renderToday();
   else if (mainTab === 'records') view.innerHTML = renderRecords();
   else if (mainTab === 'settings') view.innerHTML = renderSettings();
@@ -401,10 +403,20 @@ function render() {
     if (!t) view.innerHTML = renderNoTrip();
     else view.innerHTML = tripSwitchRow(t) + (subTab === 'check' ? renderCheck(t) : subTab === 'budget' ? renderBudget(t) : renderBook(t));
   }
-  if (detail) {
-    const active = $('.chip.active');
-    if (active) active.scrollIntoView({ inline: 'center', block: 'nearest' });
-  }
+  if (detail) centerActiveChip(stripLeft);
+}
+
+// 고른 날짜 버튼을 날짜 줄 가운데로. scrollIntoView는 페이지 전체까지 움직여서 화면이 흔들리므로 줄만 움직인다.
+function centerActiveChip(fromLeft) {
+  const strip = $('.day-strip');
+  const chip = strip && strip.querySelector('.chip.active');
+  if (!chip) return;
+  strip.scrollLeft = fromLeft;
+  const max = strip.scrollWidth - strip.clientWidth;
+  const target = Math.max(0, Math.min(max, chip.offsetLeft - (strip.clientWidth - chip.offsetWidth) / 2));
+  strip.scrollTo({ left: target, behavior: fromLeft ? 'smooth' : 'auto' });
+  // 애니메이션이 멈춰 있는 환경(화면이 가려진 경우 등)에서도 결국 제자리에 오도록
+  setTimeout(() => { if (strip.isConnected && Math.abs(strip.scrollLeft - target) > 2) strip.scrollLeft = target; }, 450);
 }
 
 function tripSub(t) {

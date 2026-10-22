@@ -1,6 +1,6 @@
 // 앱 파일을 폰에 저장해 두고 인터넷 없이도 열리게 한다.
 // 앱 파일을 수정해서 다시 배포할 때는 CACHE 이름의 숫자를 올린다.
-const CACHE = 'mastertrip-v5';
+const CACHE = 'mastertrip-v6';
 const ASSETS = [
   './',
   'index.html',
@@ -33,7 +33,8 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    // no-cache: 브라우저 HTTP 캐시(GitHub Pages는 최대 10분)를 건너뛰고 서버에 새 버전이 있는지 매번 확인
+    fetch(e.request, { cache: 'no-cache' })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));

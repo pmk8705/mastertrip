@@ -41,6 +41,7 @@
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
+html, body { overflow-x: hidden; } /* 애니메이션 중 가로로 넓어져 화면 전체가 흔들리지 않게 */
 body {
   margin: 0;
   background: var(--bg);
@@ -118,6 +119,7 @@ main { max-width: 640px; margin: 0 auto; padding: 12px 16px; }
 
 /* 날짜 칩 */
 .day-strip {
+  position: relative;
   display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 10px; margin: 0 -16px; padding-left: 16px; padding-right: 16px;
   scroll-snap-type: x mandatory; scrollbar-width: none;
 }
@@ -392,6 +394,8 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 .tl2.done .tl2-dot { filter: grayscale(1); opacity: .6; }
 
 /* 밀어서 날짜 넘길 때 살짝 미끄러지는 효과 */
+/* 타임라인 카드는 세로 스크롤만 브라우저에 맡기고, 가로 밀기는 앱이 처리 */
+.day-card { touch-action: pan-y; }
 .day-card.slide-l { animation: slide-l .22s ease-out; }
 .day-card.slide-r { animation: slide-r .22s ease-out; }
 @keyframes slide-l { from { transform: translateX(24px); opacity: .4; } to { transform: none; opacity: 1; } }
