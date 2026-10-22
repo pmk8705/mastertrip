@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$Src = (Join-Path $PSScriptRoot 'icon-source.webp'),
   [string]$OutDir = (Join-Path $PSScriptRoot '..\icons'),
   [string]$WorkDir = $env:TEMP,
@@ -102,27 +102,35 @@ public static class IconTools {
             int[] fg;
             using (var small = Resize(src, fs, fs)) fg = Read(small);
 
-            // Background: the scene is layered top-to-bottom (sky, sea, foam, sand), so each output row
-            // takes the per-channel median of the artwork's outermost columns at the matching height.
-            // Those columns hold no boat/gull, so no ghosts; rows above/below the artwork are clamped.
+            // Background: each output row continues the artwork's own edge colors at that height -
+            // the left margin takes the median of the leftmost columns, the right margin the rightmost,
+            // blended across the middle (skies that go red -> yellow left to right stay correct).
+            // The outermost columns hold no boat/gull, so no ghosts; rows above/below are clamped.
             int strip = Math.Max(1, fs / 120);
-            var rowColor = new int[fs];
-            var rs = new int[strip * 2]; var gs = new int[strip * 2]; var bs = new int[strip * 2];
-            for (int y = 0; y < fs; y++) {
-                int k = 0;
-                for (int x = 0; x < strip; x++) {
-                    foreach (int xx in new[] { x, fs - 1 - x }) {
-                        int c = fg[y * fs + xx]; rs[k] = (c >> 16) & 255; gs[k] = (c >> 8) & 255; bs[k] = c & 255; k++;
+            var leftColor = new int[fs]; var rightColor = new int[fs];
+            var rs = new int[strip]; var gs = new int[strip]; var bs = new int[strip];
+            for (int side = 0; side < 2; side++) {
+                for (int y = 0; y < fs; y++) {
+                    for (int x = 0; x < strip; x++) {
+                        int xx = side == 0 ? x : fs - 1 - x;
+                        int c = fg[y * fs + xx]; rs[x] = (c >> 16) & 255; gs[x] = (c >> 8) & 255; bs[x] = c & 255;
                     }
+                    Array.Sort(rs); Array.Sort(gs); Array.Sort(bs);
+                    int m = (255 << 24) | (rs[strip / 2] << 16) | (gs[strip / 2] << 8) | bs[strip / 2];
+                    if (side == 0) leftColor[y] = m; else rightColor[y] = m;
                 }
-                Array.Sort(rs); Array.Sort(gs); Array.Sort(bs);
-                rowColor[y] = (255 << 24) | (rs[k / 2] << 16) | (gs[k / 2] << 8) | bs[k / 2];
             }
             var bg = new int[size * size];
             for (int y = 0; y < size; y++) {
                 int sy = Math.Min(fs - 1, Math.Max(0, y - off));
-                int c = rowColor[sy];
-                for (int x = 0; x < size; x++) bg[y * size + x] = c;
+                int cl = leftColor[sy], cr = rightColor[sy];
+                for (int x = 0; x < size; x++) {
+                    double t = Math.Min(1.0, Math.Max(0.0, (double)(x - off) / fs));
+                    int r = (int)(((cl >> 16) & 255) * (1 - t) + ((cr >> 16) & 255) * t);
+                    int g = (int)(((cl >> 8) & 255) * (1 - t) + ((cr >> 8) & 255) * t);
+                    int b = (int)((cl & 255) * (1 - t) + (cr & 255) * t);
+                    bg[y * size + x] = (255 << 24) | (r << 16) | (g << 8) | b;
+                }
             }
             bg = Blur(bg, size, size, Math.Max(1, size / 100));
 
