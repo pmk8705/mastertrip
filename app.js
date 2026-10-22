@@ -47,7 +47,7 @@ function migrate(s) {
     });
     return { schema: SCHEMA_VERSION, trips: [trip] };
   }
-  return seedData();
+  return migrate(seedData()); // 처음 실행: 시드에도 분류 등 기본값 채우기
 }
 
 // 일정 항목 분류 (타임라인 아이콘·색)
@@ -867,16 +867,16 @@ function renderDays(trip) {
     <div class="day-strip">${strip}</div>
     ${mapSection(trip, day)}
     <div class="card day-card" id="dayCard">
-      <div class="day-head row">
-        <div>
-          <div class="muted small">Day ${idx + 1} · ${fmtDate(day.date)}</div>
-          <h2><span class="city">${esc(day.city || '도시 미정')}</span></h2>
-          ${costSum ? `<div class="muted small">예상 경비 ${money(costSum, trip.currency)}</div>` : ''}
+      <div class="day-head">
+        <div class="row day-head-top">
+          <span class="muted small">Day ${idx + 1} · ${fmtDate(day.date)}</span>
+          <span class="spacer"></span>
+          ${day.items.length ? `<span class="badge">${doneCnt}/${day.items.length}</span>` : ''}
+          <button class="btn sm" data-act="edit-day">도시 수정</button>
+          <button class="btn sm primary" data-act="add-item">+ 장소</button>
         </div>
-        <span class="spacer"></span>
-        ${day.items.length ? `<span class="badge">${doneCnt}/${day.items.length}</span>` : ''}
-        <button class="btn sm" data-act="edit-day">도시 수정</button>
-        <button class="btn sm primary" data-act="add-item">+ 장소</button>
+        <h2><span class="city">${esc(day.city || '도시 미정')}</span></h2>
+        ${costSum ? `<div class="muted small">예상 경비 ${money(costSum, trip.currency)}</div>` : ''}
       </div>
       <ul class="timeline2">${items}</ul>
     </div>
@@ -1415,7 +1415,7 @@ function renderSettings() {
 
 function resetAll() {
   if (!confirm('모든 여행과 수정 내용이 지워지고 처음 상태(스페인 여행 초안)로 돌아갑니다. 계속할까요?')) return;
-  state = seedData(); pickTrip(null); openTripId = null; save(); render(); toast('초기화했어요');
+  state = migrate(seedData()); pickTrip(null); openTripId = null; save(); render(); toast('초기화했어요'); // migrate: 분류 등 기본값 채우기
   clearCovers().then(render);
 }
 
