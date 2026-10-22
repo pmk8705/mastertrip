@@ -1,7 +1,8 @@
 // 초기(시드) 데이터. 앱 첫 실행 시 한 번만 저장되고, 이후에는 앱에서 수정한 내용이 유지된다.
 // 일정은 "추천 초안"이므로 자유롭게 바꿔도 된다.
 
-const SEED_VERSION = 1;
+// 저장 데이터 구조 버전. 1 = 여행 하나(state.trip/days/...), 2 = 여러 여행(state.trips[])
+const SCHEMA_VERSION = 2;
 
 function seedData() {
   let n = 0;
@@ -149,13 +150,54 @@ function seedData() {
   ];
 
   return {
-    seedVersion: SEED_VERSION,
-    trip: { title: '스페인 신혼여행', start: '2027-04-05', end: '2027-04-17' },
-    days,
-    checklist,
-    budget: { rate: 1600, plan: { 항공: 0, 숙소: 0, 교통: 0, 식비: 0, 관광: 0, 쇼핑: 0, 기타: 0 } },
-    expenses: [],
-    bookings,
-    contacts,
+    schema: SCHEMA_VERSION,
+    trips: [{
+      id: 'trip-spain',
+      title: '스페인 신혼여행',
+      emoji: '💍',
+      places: '세비야 · 그라나다 · 마요르카 · 바르셀로나',
+      region: '해외',
+      currency: 'EUR',
+      start: '2027-04-05',
+      end: '2027-04-17',
+      days,
+      checklist,
+      budget: { rate: 1600, plan: { 항공: 0, 숙소: 0, 교통: 0, 식비: 0, 관광: 0, 쇼핑: 0, 기타: 0 } },
+      expenses: [],
+      bookings,
+      contacts,
+    }],
   };
+}
+
+// 새 여행을 만들 때 기본으로 넣어 주는 체크리스트·연락처
+function newTripTemplate(region) {
+  const c = (group, text, due = null) => ({ id: uid(), group, text, due, done: false });
+  const overseas = region === '해외';
+  const checklist = overseas ? [
+    c('지금 바로', '여권 유효기간 확인 (귀국일 기준 6개월 이상 권장)', 120),
+    c('지금 바로', '항공권 예약 · 영문 이름 철자 확인', 90),
+    c('지금 바로', '숙소 예약 (무료 취소 옵션 추천)', 90),
+    c('1개월 전', '입국 서류·비자 필요 여부 확인', 30),
+    c('1개월 전', '여행자 보험 가입', 30),
+    c('1개월 전', '트래블 카드 · 환전', 20),
+    c('1개월 전', 'eSIM 또는 로밍 준비', 14),
+    c('1주 전', '예약 확인서를 폰에 오프라인 저장', 7),
+    c('1주 전', '현지 날씨 확인', 5),
+    c('전날', '온라인 체크인 · 폰·보조배터리 완충', 1),
+    c('짐 싸기', '여권 + 여권 사본(사진)'),
+    c('짐 싸기', '충전기 · 보조배터리 · 어댑터'),
+    c('짐 싸기', '상비약'),
+    c('짐 싸기', '편한 신발'),
+  ] : [
+    c('지금 바로', '숙소 예약', 30),
+    c('1주 전', '교통편 예약 (기차·버스·렌터카)', 7),
+    c('1주 전', '날씨 확인', 3),
+    c('짐 싸기', '충전기 · 보조배터리'),
+    c('짐 싸기', '상비약'),
+  ];
+  const contacts = overseas
+    ? [{ id: uid(), name: '외교부 영사콜센터 (24시간)', phone: '+82-2-3210-0404', memo: '해외 사건사고' }]
+    : [{ id: uid(), name: '경찰', phone: '112', memo: '' }, { id: uid(), name: '소방·구급', phone: '119', memo: '' }];
+  return { checklist, contacts };
 }

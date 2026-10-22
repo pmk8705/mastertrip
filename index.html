@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#c2410c">
+  <meta name="theme-color" content="#FF7A00">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -17,18 +17,20 @@
 </head>
 <body>
   <header class="topbar">
-    <div>
+    <button class="icon-btn back-btn" id="backBtn" aria-label="내 여행 목록으로" hidden>‹</button>
+    <div class="top-main">
       <p class="brand" title="MasterTrip Planner">MasterTrip</p>
-      <h1 id="tripTitle">스페인 신혼여행</h1>
+      <h1 id="tripTitle">내 여행</h1>
       <p id="tripSub" class="sub"></p>
     </div>
+    <button class="icon-btn" id="tripEditBtn" aria-label="여행 정보 수정" hidden>✎</button>
     <button class="icon-btn" id="settingsBtn" aria-label="설정">⚙</button>
   </header>
 
   <main id="view"></main>
 
   <nav class="tabbar" aria-label="메뉴">
-    <button data-tab="days" class="active"><span class="ti">📅</span>일정</button>
+    <button data-tab="trips" class="active"><span class="ti">🧳</span>내 여행</button>
     <button data-tab="check"><span class="ti">✅</span>체크리스트</button>
     <button data-tab="budget"><span class="ti">💶</span>예산</button>
     <button data-tab="book"><span class="ti">🎫</span>예약</button>
