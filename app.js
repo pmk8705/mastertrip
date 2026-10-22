@@ -951,14 +951,14 @@ function itemForm(item) {
       <div class="field"><span>🔍 장소 검색</span>
         <div class="search-row">
           <input name="place" value="${esc(item.place)}" placeholder="예: Sagrada Família" autocomplete="off">
-          <button type="button" class="btn sm" id="placeSearchBtn">검색</button>
+          <button type="button" class="btn search-btn" id="placeSearchBtn">검색</button>
+          <span class="search-sep" aria-hidden="true"></span>
+          <a class="map-find" id="mapFindBtn" target="_blank" rel="noopener"></a>
         </div>
         <input type="hidden" name="lat" value="${hasPos(item) ? item.lat : ''}">
         <input type="hidden" name="lng" value="${hasPos(item) ? item.lng : ''}">
         <div id="placeStatus" class="small muted place-status">${hasPos(item) ? '📍 위치 저장됨 (지도에 표시돼요)' : '검색해서 후보를 고르면 지도에 표시돼요'}</div>
         <div id="placeResults"></div>
-        <a class="map-find" id="mapFindBtn" target="_blank" rel="noopener"></a>
-        <div class="small muted map-find-tip">정확한 이름을 모르면 지도에서 찾은 뒤, 이름을 복사해 붙여넣고 [검색]을 누르세요.</div>
       </div>
       ${fieldHtml({ name: 'title', label: '이름 / 할 일', value: item.title, required: true, placeholder: '예: 사그라다 파밀리아 관람' })}
       <div class="field"><span>⏰ 방문 시간</span>
@@ -1103,7 +1103,9 @@ function wirePlaceSearch(trip, day) {
     const q = input.value.trim() || firstCity(day) || trip.places.split('·')[0].trim() || trip.title;
     const link = mapLink(trip, { place: q });
     findBtn.href = link.url;
-    findBtn.textContent = (trip.region === '국내' ? '🟢 네이버 지도에서 찾아보기' : '📍 구글 지도에서 찾아보기') + ' ›';
+    findBtn.textContent = trip.region === '국내' ? '🗺 네이버' : '🗺 구글';
+    findBtn.title = (trip.region === '국내' ? '네이버' : '구글') + ' 지도 사이트에서 찾아보기';
+    findBtn.classList.toggle('naver', trip.region === '국내');
   };
   updateFind();
   input.addEventListener('input', updateFind);
@@ -1133,7 +1135,9 @@ function wirePlaceSearch(trip, day) {
       let hits = await geocode(q, 5, near);
       if (!hits.length && firstCity(day) && !q.includes(firstCity(day))) hits = await geocode(`${q}, ${firstCity(day)}`, 5, near);
       if (near) hits.sort((a, b) => distKm(a, near) - distKm(b, near)); // 여행 지역에 가까운 후보부터
-      status.textContent = hits.length ? '맞는 곳을 고르세요' : '찾지 못했어요. 영어 이름이나 도시 이름을 붙여 보세요 (예: Alhambra, Granada)';
+      status.textContent = hits.length ? '맞는 곳을 고르세요'
+        : `찾지 못했어요. 옆의 [${findBtn.textContent}] 지도에서 찾은 뒤 이름을 복사해 붙여넣어 보세요`;
+      findBtn.classList.toggle('hint', !hits.length);
       results.innerHTML = hits.map((h, i) => `
         <button type="button" class="place-hit" data-i="${i}"><b>${esc(h.name)}</b><span class="muted small">${esc(h.addr)}</span></button>`).join('');
       results.querySelectorAll('.place-hit').forEach((b) => {
