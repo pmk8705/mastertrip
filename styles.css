@@ -245,34 +245,28 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 .back-btn { font-size: 26px; line-height: 1; padding-bottom: 4px; flex: 0 0 auto; }
 .topbar .icon-btn { flex: 0 0 auto; }
 
-/* 홈·내 여행 상단: 노을 배경 + 필기체 로고 (img/header.* 가 생기면 그라데이션 위에 사진을 깐다) */
+/* 홈·내 여행 상단: 로고가 그려진 노을 배너 (img/header.jpg, tools/make-header.ps1로 생성).
+   그림 속 글자가 잘리지 않도록 높이를 그림 비율(1200x396)에 맞춘다. */
 .hero {
-  position: relative; height: calc(170px + env(safe-area-inset-top)); padding: 0 20px;
-  display: flex; align-items: flex-end; overflow: hidden;
-  background:
-    linear-gradient(to bottom, rgba(10, 12, 30, .15), rgba(10, 12, 30, .45)),
-    var(--hero-image, linear-gradient(180deg, #1c2847 0%, #4a3657 30%, #b4524a 55%, #f08a3c 68%, #2c3e5c 72%, #1d2c45 100%));
-  background-size: cover; background-position: center;
+  position: relative; padding-top: env(safe-area-inset-top);
+  background: #26304a url('img/header.jpg') center bottom / 100% auto no-repeat;
 }
+.hero::before { content: ''; display: block; aspect-ratio: 1200 / 396; }
 .hero[hidden] { display: none; }
 .hero-btn {
-  position: absolute; top: calc(env(safe-area-inset-top) + 14px); right: 14px;
-  border: 0; background: none; color: #fff; width: 42px; height: 42px; border-radius: 50%; cursor: pointer;
+  position: absolute; top: calc(env(safe-area-inset-top) + 6px); right: 6px;
+  border: 0; background: rgba(10, 14, 30, .28); color: #fff; width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
   display: grid; place-items: center;
 }
-.logo {
-  margin: 0 0 34px; color: #fff; white-space: nowrap;
-  font-family: "Dancing Script", "Segoe Script", "Brush Script MT", cursive;
-  font-size: min(40px, 8vw); font-weight: 700; line-height: 1; text-shadow: 0 2px 10px rgba(0, 0, 0, .35);
-}
-.logo-m { color: var(--accent); font-size: 1.4em; }
+/* 글자 로고는 그림에 들어 있으므로 화면에서는 숨기고 화면 낭독기용으로만 남긴다 */
+.logo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
 
 /* 내 여행 상단 탭 (노을 배경 위로 살짝 겹치는 흰 판) */
 .top-tabs {
   position: sticky; top: 0; z-index: 9;
   display: grid; grid-template-columns: repeat(4, 1fr);
   background: var(--surface); border-bottom: 1px solid var(--line);
-  border-radius: 22px 22px 0 0; margin-top: -22px;
+  border-radius: 18px 18px 0 0; margin-top: -16px;
   padding-top: env(safe-area-inset-top);
 }
 .top-tabs[hidden] { display: none; }
