@@ -84,7 +84,7 @@ const SIGHTS = [
   { name: '카사 바트요', re: /바트요|batll[oó]/i, url: 'https://www.casabatllo.es/en/online-tickets/' },
   { name: '카사 밀라', re: /카사\s*밀라|페드레라|casa\s*mil[aà]|pedrera/i, url: 'https://www.lapedrera.com/en/tickets/' }, // Fundació Catalunya La Pedrera
   { name: '세비야 대성당', re: /세비야\s*대성당|히랄다|catedral\s*de\s*sevilla|seville\s*cathedral|giralda/i, url: 'https://tickets.catedraldesevilla.eu/' }, // 공식 사이트(catedraldesevilla.es)가 연결하는 판매처
-  { name: '세비야 알카사르', re: /알카사르|alc[aá]zar/i, url: '' }, // 공식 사이트(alcazarsevilla.org)가 열리지 않아 확인 못 함 → 입장권 찾기로
+  { name: '세비야 알카사르', re: /알카사르|real\s*alc[aá]zar|alc[aá]zar\s*de\s*sevilla/i, url: 'https://alcazardesevilla.infoticketing.com/es' }, // 공식 사이트(alcazarsevilla.org '방문 준비')가 연결하는 판매처. 비슷한 이름의 realalcazarsevilla.org는 대행이라 넣지 않음
 ];
 const sightsOf = (it) => SIGHTS.filter((s) => s.re.test(`${it.title || ''} ${it.place || ''}`));
 
