@@ -869,13 +869,14 @@ function renderDays(trip) {
     <div class="card day-card" id="dayCard">
       <div class="day-head row">
         <div>
-          <div class="muted small">Day ${idx + 1} · ${fmtDate(day.date, true)}</div>
+          <div class="muted small">Day ${idx + 1} · ${fmtDate(day.date)}</div>
           <h2><span class="city">${esc(day.city || '도시 미정')}</span></h2>
           ${costSum ? `<div class="muted small">예상 경비 ${money(costSum, trip.currency)}</div>` : ''}
         </div>
         <span class="spacer"></span>
         ${day.items.length ? `<span class="badge">${doneCnt}/${day.items.length}</span>` : ''}
         <button class="btn sm" data-act="edit-day">도시 수정</button>
+        <button class="btn sm primary" data-act="add-item">+ 장소</button>
       </div>
       <ul class="timeline2">${items}</ul>
     </div>

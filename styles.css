@@ -516,3 +516,10 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 }
 .map-find.naver { background: #E6F7EC; color: #11803A; border-color: #BFE8CC; } /* 네이버: 초록 */
 .map-find.hint { box-shadow: 0 0 0 3px var(--accent); }
+
+/* 일정 머리: [날짜·도시 ……] [n/m] [도시 수정] [+ 장소] — 버튼 글자는 꺾지 않고, 모자라면 왼쪽 글자가 줄어듦 */
+.day-head > div:first-child { min-width: 0; }
+.day-head h2 { word-break: keep-all; line-height: 1.25; } /* 긴 도시(이동하는 날)는 두 줄로 */
+.day-head .muted { white-space: nowrap; }
+.day-head .btn, .day-head .badge { white-space: nowrap; flex: 0 0 auto; }
+.day-head { gap: 6px; }
