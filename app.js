@@ -890,7 +890,7 @@ function renderDays(trip) {
       <ul class="timeline2">${items}</ul>
     </div>
     <button class="add-btn" data-act="add-item">+ 장소 추가</button>
-    <p class="muted small" style="text-align:center;margin-top:14px">일정을 누르면 수정, 좌우로 밀면 다른 날로 넘어가요.${hasLeg ? '<br>이동 시간은 직선거리로 어림잡은 값이에요. 정확한 길은 지도 버튼에서 확인하세요.' : ''}</p>`;
+    <p class="muted small" style="text-align:center;margin-top:14px">일정을 누르면 수정, 좌우로 밀면 다른 날로 넘어가요.${hasLeg ? '<br>“자동” 이동 시간은 직선거리 어림값이에요. 이동 줄을 눌러 수단·시간을 정할 수 있어요.' : ''}</p>`;
 }
 
 /* ---------- 시간 겹침 ---------- */
@@ -929,41 +929,126 @@ function conflictIds(day) {
   return ids;
 }
 
-/* ---------- 일정 사이 이동 (직선거리 기반 어림값) ---------- */
-// 실제 길찾기는 유료/제한이 있어 2단계에서 바꾸기로 함. 지금은 직선거리 × 1.3 으로 수단·시간을 짐작.
+/* ---------- 일정 사이 이동: 앱이 거리로 제안(자동) → 여행자가 수단·시간을 정함 ---------- */
+// 직접 정한 이동은 '도착하는 일정'에 저장: item.move = { mode, label, min, memo }
+// 실제 길찾기는 유료/제한이 있어 2단계에서. 지금 '자동'은 직선거리 × 1.3(30km 넘으면 × 1.15) 어림값.
+const MOVE_MODES = {
+  walk: { icon: '🚶', name: '도보' },
+  subway: { icon: '🚇', name: '지하철' },
+  bus: { icon: '🚌', name: '버스' },
+  car: { icon: '🚗', name: '차' },
+  train: { icon: '🚆', name: '기차' },
+  flight: { icon: '✈️', name: '항공' },
+  etc: { icon: '✏️', name: '기타' },
+};
 const ROUTE_FACTOR = 1.3;
-function travelLeg(a, b) {
+
+function legKm(a, b) {
   if (!hasPos(a) || !hasPos(b)) return null;
   const straight = distKm(a, b);
-  const km = straight * (straight * ROUTE_FACTOR > 30 ? 1.15 : ROUTE_FACTOR); // 장거리(기차·고속도로)는 덜 돌아감
-  const round5 = (n) => (n < 10 ? Math.max(1, Math.round(n)) : Math.round(n / 5) * 5);
-  let mode, min = null;
-  if (km <= 2) { mode = '🚶 도보'; min = round5(km / 4.5 * 60); } // 여행 중엔 2km(약 25분)까지는 대개 걸어감
-  else if (km <= 30) { mode = '🚕 차량·대중교통'; min = round5(km / 22 * 60 + 5); }
-  else if (km <= 300) { mode = '🚆 기차·버스'; min = round5(km / 80 * 60 + 15); }
-  else mode = '✈️ 항공';
-  const dist = km < 1 ? `${Math.round(km * 1000 / 10) * 10}m` : `${km < 10 ? km.toFixed(1) : Math.round(km)}km`;
-  return { km, min, mode, dist };
+  return straight * (straight * ROUTE_FACTOR > 30 ? 1.15 : ROUTE_FACTOR); // 장거리(기차·고속도로)는 덜 돌아감
 }
+// 거리로 고른 '자동' 수단
+function autoMode(km) {
+  if (km <= 2) return 'walk'; // 여행 중엔 2km(약 25분)까지는 대개 걸어감
+  if (km <= 30) return 'car';
+  if (km <= 300) return 'train';
+  return 'flight';
+}
+// 수단별 어림 시간(분). 짐작할 수 없으면 null (항공·기타)
+function estMin(km, mode) {
+  if (km == null) return null;
+  const r5 = (n) => (n < 10 ? Math.max(1, Math.round(n)) : Math.round(n / 5) * 5);
+  switch (mode) {
+    case 'walk': return r5(km / 4.5 * 60);
+    case 'subway': return r5(km / 25 * 60 + 10); // 역까지 걷기·기다림 포함
+    case 'bus': return r5(km / 18 * 60 + 8);
+    case 'car': return r5(km > 30 ? km / 70 * 60 + 10 : km / 22 * 60 + 5);
+    case 'train': return r5(km / 80 * 60 + 15);
+    default: return null;
+  }
+}
+const fmtDist = (km) => (km < 1 ? `${Math.round(km * 100) * 10}m` : `${km < 10 ? km.toFixed(1) : Math.round(km)}km`);
 function fmtMin(n) {
   if (n < 60) return `${n}분`;
   const h = Math.floor(n / 60), m = n % 60;
   return m ? `${h}시간 ${m}분` : `${h}시간`;
 }
-// 두 일정 사이 줄: 이동 수단·시간·거리 + 앞 일정 끝~다음 일정 시작 여유가 모자라면 경고
+
+// a → b 이동 정보: 직접 정한 값이 있으면 그것, 없으면 자동
+function travelLeg(a, b) {
+  const km = legKm(a, b);
+  const mv = b.move;
+  if (mv && mv.mode) {
+    const min = mv.min != null && mv.min !== '' ? Number(mv.min) : estMin(km, mv.mode);
+    const m = MOVE_MODES[mv.mode] || MOVE_MODES.etc;
+    return { km, min, icon: m.icon, name: mv.mode === 'etc' ? (mv.label || '기타') : m.name, memo: mv.memo || '', manual: true, mode: mv.mode };
+  }
+  if (km == null) return null;
+  const mode = autoMode(km);
+  return { km, min: estMin(km, mode), icon: MOVE_MODES[mode].icon, name: mode === 'car' ? '차·대중교통' : MOVE_MODES[mode].name, memo: '', manual: false, mode };
+}
+
+// 두 일정 사이 줄. 누르면 수단·시간을 정하는 창
 function legHtml(a, b) {
   const leg = travelLeg(a, b);
-  if (!leg || leg.km < 0.05) return '';
+  if (!leg || (!leg.manual && leg.km < 0.05)) return '';
   const ra = itemRange(a), rb = itemRange(b);
   const gap = ra && rb ? rb.start - ra.end : null;
-  // '이동' 일정이 끼어 있거나 장거리면 그 일정 자체가 이동이라 경고하지 않음 (헛경고 방지)
-  const isMove = a.cat === '이동' || b.cat === '이동';
-  const tight = !isMove && leg.km <= 30 && leg.min != null && gap != null && gap >= 0 && leg.min > gap;
+  // 자동일 때는 '이동' 일정이 끼었거나 장거리면 경고하지 않음 (그 일정 자체가 이동이라 헛경고). 직접 정했으면 항상 확인
+  const skip = !leg.manual && (a.cat === '이동' || b.cat === '이동' || leg.km > 30);
+  const tight = !skip && leg.min != null && gap != null && gap >= 0 && leg.min > gap;
+  const parts = [`${leg.icon} ${esc(leg.name)}`];
+  if (leg.min != null) parts.push(`${leg.manual && b.move.min != null && b.move.min !== '' ? '' : '약 '}${fmtMin(leg.min)}`);
+  if (leg.km != null) parts.push(fmtDist(leg.km));
   return `
-    <li class="tl2-leg ${tight ? 'tight' : ''}">
-      <span class="leg-text">${leg.mode}${leg.min != null ? ` 약 ${fmtMin(leg.min)}` : ''} · ${leg.dist}</span>
+    <li class="tl2-leg ${tight ? 'tight' : ''} ${leg.manual ? 'set' : 'auto'}">
+      <button class="leg-text" data-act="edit-leg" data-id="${b.id}">${parts.join(' · ')}${leg.manual ? '' : ' <span class="leg-auto">자동</span>'} <span class="leg-edit">✎</span></button>
+      ${leg.memo ? `<div class="leg-memo">${esc(leg.memo)}</div>` : ''}
       ${tight ? `<span class="leg-warn">⚠ 이동 시간이 빠듯해요 (여유 ${fmtMin(gap)})</span>` : ''}
     </li>`;
+}
+
+function legForm(a, b) {
+  const km = legKm(a, b);
+  const auto = km != null ? autoMode(km) : null;
+  const cur = b.move && b.move.mode ? b.move.mode : 'auto';
+  const chips = [['auto', `🤖 자동${auto ? ` (${MOVE_MODES[auto].name})` : ''}`], ...Object.entries(MOVE_MODES).map(([k, m]) => [k, `${m.icon} ${m.name}`])]
+    .map(([k, label]) => `<label class="pick-chip cat"><input type="radio" name="mode" value="${k}" ${k === cur ? 'checked' : ''}><span>${label}</span></label>`).join('');
+  const mv = b.move || {};
+  openModal({
+    title: '이동 방법',
+    html: `
+      <p class="small muted" style="margin-top:0">${esc(a.title)} → ${esc(b.title)}${km != null ? ` · 약 ${fmtDist(km)}` : ''}</p>
+      <div class="field"><span>이동 수단</span><div class="pick-wrap">${chips}</div></div>
+      <div class="field" id="legLabelBox" ${cur === 'etc' ? '' : 'hidden'}><span>직접 입력</span>
+        <input name="label" class="dur-input" style="margin-top:0" value="${esc(mv.label || '')}" placeholder="예: 도보+지하철, 페리, 자전거"></div>
+      <div class="field"><span>소요 시간</span>
+        <input name="min" class="dur-input" style="margin-top:0" value="${mv.min != null && mv.min !== '' ? esc(fmtMin(Number(mv.min))) : ''}" placeholder="">
+        <div class="small muted" id="legEstTip" style="margin-top:6px"></div></div>
+      ${fieldHtml({ name: 'memo', label: '메모 (노선·출구 등)', value: mv.memo || '', placeholder: '예: L5호선 Diagonal → Verdaguer' })}`,
+    onSave: (d) => {
+      if (d.mode === 'auto') { delete b.move; return; }
+      const typed = d.min.trim();
+      const min = typed === '' ? '' : (/^\d+$/.test(typed) ? Number(typed) : parseDurMin(typed));
+      if (typed !== '' && !min) { toast('소요 시간을 확인하세요 (예: 25, 1시간 30분)'); return false; }
+      if (d.mode === 'etc' && !d.label) { toast('이동 방법을 적어 주세요 (예: 도보+지하철)'); return false; }
+      b.move = { mode: d.mode, label: d.mode === 'etc' ? d.label : '', min, memo: d.memo };
+    },
+  });
+  // 수단을 바꾸면: 기타 입력칸 보이기 + 그 수단의 어림 시간을 안내
+  const form = $('#modalForm');
+  const update = () => {
+    const mode = form.querySelector('input[name=mode]:checked').value;
+    $('#legLabelBox').hidden = mode !== 'etc';
+    const est = estMin(km, mode === 'auto' ? auto : mode);
+    form.min.placeholder = est != null ? `비우면 자동: 약 ${fmtMin(est)}` : '예: 25, 1시간 30분';
+    $('#legEstTip').textContent = mode === 'auto' ? '앱이 거리로 짐작한 값을 써요'
+      : est != null ? '비워 두면 거리로 어림잡고, 적으면 그 시간을 써요 (예: 25 → 25분)'
+      : '이 수단은 앱이 시간을 짐작할 수 없어요. 시간을 적어 주세요';
+  };
+  form.querySelectorAll('input[name=mode]').forEach((r) => { r.onchange = update; });
+  update();
 }
 
 function timelineItem(trip, it, i, clash) {
@@ -1588,6 +1673,11 @@ $('#view').addEventListener('click', (ev) => {
   switch (act) {
     case 'new-trip': tripForm(null); break;
     case 'switch-trip': tripPicker(); break;
+    case 'edit-leg': {
+      const j = day.items.findIndex((x) => x.id === id);
+      if (j > 0) legForm(day.items[j - 1], day.items[j]);
+      break;
+    }
     case 'toggle-map': mapOpen = !mapOpen; remember('map', mapOpen ? '1' : '0'); render(); break;
     case 'geocode-all': geocodeAll(detailTrip()); break;
     case 'search-close': searchOpen = false; searchQuery = ''; render(); break;
