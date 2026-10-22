@@ -959,9 +959,18 @@ function itemForm(item) {
         <div id="placeResults"></div>
       </div>
       ${fieldHtml({ name: 'title', label: '이름 / 할 일', value: item.title, required: true, placeholder: '예: 사그라다 파밀리아 관람' })}
-      <div class="field-row">
-        ${fieldHtml({ name: 'time', label: '⏰ 방문 시간', value: item.time, placeholder: '예: 09:30, 오전' })}
-        ${fieldHtml({ name: 'dur', label: '소요 시간', value: item.dur, placeholder: '예: 2시간' })}
+      <div class="field"><span>⏰ 방문 시간</span>
+        <div class="time-pick">
+          <div class="wheel-box" id="wheelBox">
+            <div class="wheel" id="wheelH"></div><b class="wheel-colon">:</b><div class="wheel" id="wheelM"></div>
+          </div>
+          <label class="pick-chip unset"><input type="checkbox" id="timeUnset"><span>시간<br>미정</span></label>
+        </div>
+        <input type="hidden" name="time" value="${esc(item.time)}">
+      </div>
+      <div class="field"><span>소요 시간</span>
+        <div class="pick-wrap" id="durChips">${DUR_PRESETS.map((v) => `<button type="button" class="dur-chip ${v === item.dur ? 'on' : ''}">${v}</button>`).join('')}</div>
+        <input name="dur" class="dur-input" value="${esc(item.dur)}" placeholder="직접 입력 (예: 40분)">
       </div>
       ${fieldHtml({ name: 'memo', label: '✏️ 메모 / 할 일', type: 'textarea', value: item.memo })}
       <div class="field"><span>분류</span><div class="pick-wrap">${catChips}</div></div>
@@ -987,6 +996,87 @@ function itemForm(item) {
   const checked = $('#modalBody input[name=date]:checked');
   if (checked) checked.parentElement.scrollIntoView({ inline: 'center', block: 'nearest' });
   wirePlaceSearch(curDay);
+  wireTimeWheel(item, curDay, isNew);
+}
+
+/* ---------- 시간 휠 (00~23시 · 5분 단위) + 시간 미정 ---------- */
+const DUR_PRESETS = ['30분', '1시간', '1시간 30분', '2시간', '3시간', '반나절'];
+const WHEEL_ROW = 44; // 휠 한 칸 높이(px) — styles.css .wheel div 와 같게
+const VAGUE_TIME = { 새벽: '06:00', 아침: '08:00', 오전: '09:00', 점심: '12:00', 오후: '14:00', 저녁: '19:00', 밤: '21:00' };
+
+function wireTimeWheel(item, day, isNew) {
+  const form = $('#modalForm');
+  const hidden = form.time;
+  const original = item.time || '';
+  const hEl = $('#wheelH');
+  const mEl = $('#wheelM');
+  const unset = $('#timeUnset');
+  const pad = (n) => String(n).padStart(2, '0');
+  const fill = (el, values) => {
+    el.innerHTML = '<i class="sp"></i>' + values.map((v) => `<div>${pad(v)}</div>`).join('') + '<i class="sp"></i>';
+  };
+  fill(hEl, [...Array(24).keys()]);
+  fill(mEl, [...Array(12).keys()].map((i) => i * 5));
+
+  // 처음 위치: 정확한 시간이면 그대로(분은 5분 단위로 반올림), "오전" 같은 말이면 대략, 새 일정이면 직전 일정 + 1시간
+  let start = isHHMM(original) ? original : VAGUE_TIME[original.trim()];
+  if (!start) {
+    const prev = [...day.items].reverse().find((x) => isHHMM(x.time));
+    start = prev ? `${pad(Math.min(23, Number(prev.time.split(':')[0]) + 1))}:${prev.time.split(':')[1]}` : '09:00';
+  }
+  let [h, m] = start.split(':').map(Number);
+  m = Math.round(m / 5) * 5;
+  if (m === 60) { m = 0; h = Math.min(23, h + 1); }
+
+  let touched = false; // 사용자가 휠·미정을 건드리지 않으면 원래 값(예: "오전")을 그대로 둔다
+  const read = (el) => Math.max(0, Math.round(el.scrollTop / WHEEL_ROW));
+  const mark = (el) => { const i = read(el); el.querySelectorAll('div').forEach((d, k) => d.classList.toggle('sel', k === i)); };
+  const sync = () => {
+    mark(hEl); mark(mEl);
+    if (!touched) return;
+    hidden.value = unset.checked ? '' : `${pad(Math.min(23, read(hEl)))}:${pad(Math.min(11, read(mEl)) * 5)}`;
+  };
+  // 휠은 레이아웃이 잡힌 뒤에 위치를 정해야 한다 (requestAnimationFrame은 화면이 가려지면 멈추므로 setTimeout)
+  setTimeout(() => {
+    hEl.scrollTop = h * WHEEL_ROW;
+    mEl.scrollTop = (m / 5) * WHEEL_ROW;
+    mark(hEl); mark(mEl);
+    setTimeout(() => {
+      for (const el of [hEl, mEl]) {
+        let t;
+        el.addEventListener('scroll', () => { touched = true; mark(el); clearTimeout(t); t = setTimeout(sync, 90); });
+        // 칸을 눌러도 그 시간으로
+        el.addEventListener('click', (e) => {
+          const row = e.target.closest('.wheel div');
+          if (!row) return;
+          const i = [...el.querySelectorAll('div')].indexOf(row);
+          el.scrollTop = i * WHEEL_ROW; // 즉시 이동 (애니메이션이 멈춘 환경에서도 동작)
+          touched = true;
+          sync();
+        });
+      }
+    }, 150);
+  }, 0);
+  const applyUnset = () => { $('#wheelBox').classList.toggle('off', unset.checked); };
+  unset.onchange = () => { touched = true; applyUnset(); sync(); };
+  // 새 일정: 휠 시간으로 바로 시작. 시간이 비어 있던 기존 일정: '미정'으로 열기 (몰래 시간을 넣지 않음)
+  if (isNew) { touched = true; setTimeout(sync, 200); }
+  else if (!original) unset.checked = true;
+  applyUnset();
+
+  // 소요 시간: 버튼으로 빠르게, 아니면 직접 입력
+  const durInput = form.dur;
+  document.querySelectorAll('#durChips .dur-chip').forEach((b) => {
+    b.onclick = () => {
+      const on = !b.classList.contains('on');
+      document.querySelectorAll('#durChips .dur-chip').forEach((x) => x.classList.remove('on'));
+      b.classList.toggle('on', on);
+      durInput.value = on ? b.textContent : '';
+    };
+  });
+  durInput.addEventListener('input', () => {
+    document.querySelectorAll('#durChips .dur-chip').forEach((x) => x.classList.toggle('on', x.textContent === durInput.value.trim()));
+  });
 }
 
 function wirePlaceSearch(day) {
