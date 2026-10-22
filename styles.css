@@ -520,4 +520,6 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 /* 일정 머리: 1줄 [Day·날짜 …… n/m 도시 수정 + 장소], 2줄 도시 이름(한 줄 전체), 3줄 예상 경비 */
 .day-head-top { gap: 6px; }
 .day-head-top .btn, .day-head-top .badge, .day-head-top .muted { white-space: nowrap; flex: 0 0 auto; }
-.day-head h2 { margin-top: 6px; word-break: keep-all; line-height: 1.25; }
+.day-head-city { margin-top: 6px; align-items: flex-start; }
+.day-head h2 { word-break: keep-all; line-height: 1.25; min-width: 0; }
+.day-head-city .badge { flex: 0 0 auto; margin-top: 3px; white-space: nowrap; }

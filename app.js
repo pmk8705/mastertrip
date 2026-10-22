@@ -131,10 +131,12 @@ function ymd(d) {
 function parseDate(s) { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); }
 function diffDays(a, b) { return Math.round((parseDate(a) - parseDate(b)) / 86400000); }
 function addDays(s, n) { const d = parseDate(s); d.setDate(d.getDate() + n); return ymd(d); }
-function fmtDate(s, withYear = false) {
+// 날짜 표기 (사용자 결정): 27.04.13 (화). 위쪽 날짜 버튼만 짧게 4/13.
+function fmtDate(s) {
   if (!s) return '';
   const d = parseDate(s);
-  return `${withYear ? d.getFullYear() + '. ' : ''}${d.getMonth() + 1}/${d.getDate()} (${WEEK[d.getDay()]})`;
+  const p2 = (n) => String(n).padStart(2, '0');
+  return `${p2(d.getFullYear() % 100)}.${p2(d.getMonth() + 1)}.${p2(d.getDate())} (${WEEK[d.getDay()]})`;
 }
 function fmtRange(start, end) {
   const dot = (s) => s.replace(/-/g, '.');
@@ -871,11 +873,14 @@ function renderDays(trip) {
         <div class="row day-head-top">
           <span class="muted small">Day ${idx + 1} · ${fmtDate(day.date)}</span>
           <span class="spacer"></span>
-          ${day.items.length ? `<span class="badge">${doneCnt}/${day.items.length}</span>` : ''}
           <button class="btn sm" data-act="edit-day">도시 수정</button>
           <button class="btn sm primary" data-act="add-item">+ 장소</button>
         </div>
-        <h2><span class="city">${esc(day.city || '도시 미정')}</span></h2>
+        <div class="row day-head-city">
+          <h2><span class="city">${esc(day.city || '도시 미정')}</span></h2>
+          <span class="spacer"></span>
+          ${day.items.length ? `<span class="badge">${doneCnt}/${day.items.length} 완료</span>` : ''}
+        </div>
         ${costSum ? `<div class="muted small">예상 경비 ${money(costSum, trip.currency)}</div>` : ''}
       </div>
       <ul class="timeline2">${items}</ul>
