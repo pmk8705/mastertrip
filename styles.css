@@ -129,7 +129,9 @@ main { max-width: 640px; margin: 0 auto; padding: 12px 16px; }
 }
 .chip b { display: block; font-size: 17px; }
 .chip span { font-size: 11px; color: var(--muted); }
-.chip.today { border-color: var(--gold); }
+.chip.past:not(.active) { background: var(--surface-2); border-color: transparent; }
+.chip.past:not(.active) b, .chip.past:not(.active) span { color: var(--muted); }
+.chip.today { border: 2px solid var(--accent); }
 .chip.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .chip.active span { color: var(--on-accent); opacity: .8; }
 
@@ -360,3 +362,65 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
   width: 64px; height: 44px; border-radius: 10px; flex: 0 0 auto;
   background: var(--surface-2) center / cover no-repeat; border: 1px solid var(--line);
 }
+
+/* 타임라인 (분류 아이콘 + 세로선) */
+.timeline2 { list-style: none; margin: 4px 0 0; padding: 0; }
+.tl2 { position: relative; display: grid; grid-template-columns: 34px 1fr; gap: 10px; padding: 6px 0; }
+.tl2::before { content: ''; position: absolute; left: 16px; top: 0; bottom: 0; width: 2px; background: var(--line); }
+.tl2:first-child::before { top: 22px; }
+.tl2:last-child::before { bottom: calc(100% - 22px); }
+.tl2-dot {
+  position: relative; z-index: 1; width: 34px; height: 34px; border-radius: 50%; margin-top: 6px;
+  display: grid; place-items: center; font-size: 16px;
+  background: color-mix(in srgb, var(--cat) 18%, var(--surface)); border: 2px solid var(--cat);
+}
+.tl2-card {
+  min-width: 0; cursor: pointer; padding: 10px 12px; border-radius: 12px;
+  background: var(--bg); border-left: 3px solid var(--cat);
+}
+.tl2-top { display: flex; align-items: center; gap: 6px; }
+.tl2-time { font-size: 13px; font-weight: 700; color: var(--accent-ink); }
+.tl2-title { font-weight: 700; margin-top: 2px; }
+.tl2-foot { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.tl2-cost { font-size: 13px; font-weight: 600; }
+.tl2-check {
+  width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--line); background: var(--surface);
+  cursor: pointer; padding: 0; font-size: 13px; color: #fff; flex: 0 0 auto;
+}
+.tl2.done .tl2-check { background: var(--ok); border-color: var(--ok); }
+.tl2.done .tl2-title { text-decoration: line-through; color: var(--muted); }
+.tl2.done .tl2-dot { filter: grayscale(1); opacity: .6; }
+
+/* 밀어서 날짜 넘길 때 살짝 미끄러지는 효과 */
+.day-card.slide-l { animation: slide-l .22s ease-out; }
+.day-card.slide-r { animation: slide-r .22s ease-out; }
+@keyframes slide-l { from { transform: translateX(24px); opacity: .4; } to { transform: none; opacity: 1; } }
+@keyframes slide-r { from { transform: translateX(-24px); opacity: .4; } to { transform: none; opacity: 1; } }
+
+/* 입력창 안의 선택 칩 (날짜·분류) */
+.pick-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.pick-scroll::-webkit-scrollbar { display: none; }
+.pick-wrap { display: flex; gap: 6px; flex-wrap: wrap; }
+.pick-chip { flex: 0 0 auto; cursor: pointer; }
+.pick-chip input { position: absolute; opacity: 0; pointer-events: none; }
+.pick-chip span {
+  display: block; text-align: center; font-size: 12px; line-height: 1.3; padding: 7px 11px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--bg);
+}
+.pick-chip.cat span { font-size: 14px; border-radius: 99px; }
+.pick-chip input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
+
+/* 폰에서는 입력창을 화면 아래에서 올라오는 바텀시트로 */
+@media (max-width: 640px) {
+  dialog {
+    margin: auto 0 0; width: 100%; max-width: 100%; border-radius: 22px 22px 0 0;
+  }
+  dialog[open] { animation: sheet-up .24s ease-out; }
+  dialog::backdrop { background: rgba(20, 12, 5, .3); }
+  dialog form { max-height: 78vh; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+  dialog form::before {
+    content: ''; display: block; width: 40px; height: 5px; border-radius: 99px; background: var(--line); margin: -6px auto 12px;
+  }
+  .modal-actions { position: sticky; bottom: calc(-18px - env(safe-area-inset-bottom)); background: var(--surface); padding: 10px 0 4px; }
+}
+@keyframes sheet-up { from { transform: translateY(40%); opacity: .5; } to { transform: none; opacity: 1; } }
