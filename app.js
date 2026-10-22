@@ -863,7 +863,8 @@ function renderDays(trip) {
   const day = trip.days[idx];
   const doneCnt = day.items.filter((i) => i.done).length;
   const costSum = day.items.reduce((sum, i) => sum + (Number(i.cost) || 0), 0);
-  const items = day.items.length ? day.items.map((it, i) => timelineItem(trip, it, i)).join('') : '<li class="empty-state">아직 일정이 없어요</li>';
+  const clash = conflictIds(day);
+  const items = day.items.length ? day.items.map((it, i) => timelineItem(trip, it, i, clash.has(it.id))).join('') : '<li class="empty-state">아직 일정이 없어요</li>';
 
   return `
     <div class="day-strip">${strip}</div>
@@ -889,7 +890,43 @@ function renderDays(trip) {
     <p class="muted small" style="text-align:center;margin-top:14px">일정을 누르면 수정, 좌우로 밀면 다른 날로 넘어가요.</p>`;
 }
 
-function timelineItem(trip, it, i) {
+/* ---------- 시간 겹침 ---------- */
+// 소요 시간 글자 → 분 ("30분", "1시간 30분", "1.5시간", "반나절"). 못 알아들으면 null
+function parseDurMin(text) {
+  const t = String(text || '').replace(/\s/g, '');
+  if (!t) return null;
+  if (/반나절/.test(t)) return 240;
+  if (/종일|하루/.test(t)) return 480;
+  const h = t.match(/(\d+(?:\.\d+)?)시간/);
+  const m = t.match(/(\d+)분/);
+  if (!h && !m) return null;
+  return Math.round((h ? Number(h[1]) * 60 : 0) + (m ? Number(m[1]) : 0)) || null;
+}
+const DEFAULT_DUR_MIN = 60; // 소요 시간이 없으면 1시간으로 가정
+const toMin = (t) => { const [hh, mm] = t.split(':').map(Number); return hh * 60 + mm; };
+const fromMin = (n) => `${String(Math.floor(n / 60) % 24).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
+
+// 일정의 시간 범위 (시간 미정이면 null)
+function itemRange(it) {
+  if (!isHHMM(it.time)) return null;
+  const start = toMin(it.time);
+  return { start, end: start + (parseDurMin(it.dur) || DEFAULT_DUR_MIN) };
+}
+const overlaps = (a, b) => a.start < b.end && b.start < a.end;
+
+// 그날 일정 중 시간이 겹치는 것들의 id
+function conflictIds(day) {
+  const ids = new Set();
+  const ranged = day.items.map((it) => [it, itemRange(it)]).filter(([, r]) => r);
+  for (let i = 0; i < ranged.length; i++) {
+    for (let j = i + 1; j < ranged.length; j++) {
+      if (overlaps(ranged[i][1], ranged[j][1])) { ids.add(ranged[i][0].id); ids.add(ranged[j][0].id); }
+    }
+  }
+  return ids;
+}
+
+function timelineItem(trip, it, i, clash) {
   const c = ITEM_CATS[it.cat] || ITEM_CATS['기타'];
   const when = [it.time, it.dur].filter(Boolean).join(' · ');
   const cost = Number(it.cost) || 0;
@@ -902,7 +939,7 @@ function timelineItem(trip, it, i) {
       <span class="tl2-dot" title="${esc(it.cat)}">${c.icon}<span class="tl2-num">${i + 1}</span></span>
       <div class="tl2-card" data-act="edit-item" data-id="${it.id}">
         <div class="tl2-top">
-          <span class="tl2-time">${esc(when || it.cat)}</span><span class="spacer"></span>
+          <span class="tl2-time">${esc(when || it.cat)}</span>${clash ? '<span class="tl2-warn">⚠ 시간 겹침</span>' : ''}<span class="spacer"></span>
           <button class="tl2-check" data-act="toggle-item" data-id="${it.id}" aria-label="완료 표시">${it.done ? '✓' : ''}</button>
         </div>
         <div class="tl2-title">${esc(it.title)}</div>
@@ -975,6 +1012,7 @@ function itemForm(item) {
           <label class="pick-chip unset"><input type="checkbox" id="timeUnset"><span>시간<br>미정</span></label>
         </div>
         <input type="hidden" name="time" value="${esc(item.time)}">
+        <div id="timeConflict" class="time-conflict" hidden></div>
       </div>
       <div class="field"><span>소요 시간</span>
         <div class="pick-wrap" id="durChips">${DUR_PRESETS.map((v) => `<button type="button" class="dur-chip ${v === item.dur ? 'on' : ''}">${v}</button>`).join('')}</div>
@@ -1004,7 +1042,10 @@ function itemForm(item) {
   const checked = $('#modalBody input[name=date]:checked');
   if (checked) checked.parentElement.scrollIntoView({ inline: 'center', block: 'nearest' });
   wirePlaceSearch(trip, curDay);
-  wireTimeWheel(item, curDay, isNew);
+  wireTimeWheel(item, curDay, isNew, () => checkConflict(trip, item));
+  // 날짜 칩은 입력창을 열 때마다 새로 만들어지므로 여기에 직접 연결 (폼 자체에 붙이면 열 때마다 쌓임)
+  document.querySelectorAll('#modalBody input[name=date]').forEach((r) => { r.onchange = () => checkConflict(trip, item); });
+  checkConflict(trip, item);
 }
 
 /* ---------- 시간 휠 (00~23시 · 5분 단위) + 시간 미정 ---------- */
@@ -1012,7 +1053,23 @@ const DUR_PRESETS = ['30분', '1시간', '1시간 30분', '2시간', '3시간', 
 const WHEEL_ROW = 44; // 휠 한 칸 높이(px) — styles.css .wheel div 와 같게
 const VAGUE_TIME = { 새벽: '06:00', 아침: '08:00', 오전: '09:00', 점심: '12:00', 오후: '14:00', 저녁: '19:00', 밤: '21:00' };
 
-function wireTimeWheel(item, day, isNew) {
+// 입력창에서 고른 날짜·시간·소요 시간이 그날 다른 일정과 겹치면 경고 (저장은 막지 않음)
+function checkConflict(trip, item) {
+  const form = $('#modalForm');
+  const box = $('#timeConflict');
+  if (!form || !box) return;
+  const date = (form.querySelector('input[name=date]:checked') || {}).value;
+  const day = trip.days.find((d) => d.date === date);
+  const mine = itemRange({ time: form.time.value, dur: form.dur.value });
+  const hits = day && mine ? day.items.filter((x) => x !== item && itemRange(x) && overlaps(mine, itemRange(x))) : [];
+  box.hidden = !hits.length;
+  box.innerHTML = hits.map((x) => {
+    const r = itemRange(x);
+    return `⚠ <b>${esc(x.time)} ${esc(x.title)}</b> (${fromMin(r.start)}~${fromMin(r.end)})과 시간이 겹쳐요`;
+  }).join('<br>') + (hits.length && !parseDurMin(form.dur.value) ? '<br><span class="muted">소요 시간이 없으면 1시간으로 계산해요</span>' : '');
+}
+
+function wireTimeWheel(item, day, isNew, onChange = () => {}) {
   const form = $('#modalForm');
   const hidden = form.time;
   const original = item.time || '';
@@ -1043,6 +1100,7 @@ function wireTimeWheel(item, day, isNew) {
     mark(hEl); mark(mEl);
     if (!touched) return;
     hidden.value = unset.checked ? '' : `${pad(Math.min(23, read(hEl)))}:${pad(Math.min(11, read(mEl)) * 5)}`;
+    onChange();
   };
   // 휠은 레이아웃이 잡힌 뒤에 위치를 정해야 한다 (requestAnimationFrame은 화면이 가려지면 멈추므로 setTimeout)
   setTimeout(() => {
@@ -1080,10 +1138,12 @@ function wireTimeWheel(item, day, isNew) {
       document.querySelectorAll('#durChips .dur-chip').forEach((x) => x.classList.remove('on'));
       b.classList.toggle('on', on);
       durInput.value = on ? b.textContent : '';
+      onChange();
     };
   });
   durInput.addEventListener('input', () => {
     document.querySelectorAll('#durChips .dur-chip').forEach((x) => x.classList.toggle('on', x.textContent === durInput.value.trim()));
+    onChange();
   });
 }
 

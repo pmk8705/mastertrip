@@ -523,3 +523,13 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 .day-head-city { margin-top: 6px; align-items: flex-start; }
 .day-head h2 { word-break: keep-all; line-height: 1.25; min-width: 0; }
 .day-head-city .badge { flex: 0 0 auto; margin-top: 3px; white-space: nowrap; }
+
+/* 시간 겹침 경고 */
+.time-conflict {
+  margin-top: 8px; padding: 9px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5;
+  background: #FFF4E5; color: #8A4B00; border: 1px solid #FFD8A8;
+}
+.tl2-warn {
+  margin-left: 6px; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 99px;
+  background: #FFF4E5; color: #B45309; border: 1px solid #FFD8A8; white-space: nowrap;
+}
