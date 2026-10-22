@@ -75,6 +75,19 @@ function guessCat(title) {
   return hit ? hit[1] : '관광';
 }
 
+// 유명 관광지 → 공식 운영 주체 사이트만 (재판매·대행 사이트 금지). url이 없는 곳은 공식 판매처를 확인하지 못해 예약 연결에만 쓴다.
+// 2026-10-23 확인: 각 사이트를 열어 운영 주체 이름·공식 표기와 티켓 페이지를 확인함.
+const SIGHTS = [
+  { name: '사그라다 파밀리아', re: /사그라다|sagrada/i, url: 'https://sagradafamilia.org/en/tickets' }, // Junta Constructora del Temple Expiatori de la Sagrada Família
+  { name: '알함브라', re: /알함브라|alhambra/i, url: 'https://tickets.alhambra-patronato.es/' }, // Patronato de la Alhambra y Generalife 공식 사이트가 연결하는 판매처
+  { name: '구엘 공원', re: /구엘\s*공원|park\s*g[üu]ell|parc\s*g[üu]ell/i, url: 'https://parkguell.barcelona/en/buy-tickets' }, // Barcelona de Serveis Municipals
+  { name: '카사 바트요', re: /바트요|batll[oó]/i, url: 'https://www.casabatllo.es/en/online-tickets/' },
+  { name: '카사 밀라', re: /카사\s*밀라|페드레라|casa\s*mil[aà]|pedrera/i, url: 'https://www.lapedrera.com/en/tickets/' }, // Fundació Catalunya La Pedrera
+  { name: '세비야 대성당', re: /세비야\s*대성당|히랄다|catedral\s*de\s*sevilla|seville\s*cathedral|giralda/i, url: 'https://tickets.catedraldesevilla.eu/' }, // 공식 사이트(catedraldesevilla.es)가 연결하는 판매처
+  { name: '세비야 알카사르', re: /알카사르|alc[aá]zar/i, url: '' }, // 공식 사이트(alcazarsevilla.org)가 열리지 않아 확인 못 함 → 입장권 찾기로
+];
+const sightsOf = (it) => SIGHTS.filter((s) => s.re.test(`${it.title || ''} ${it.place || ''}`));
+
 function normalizeTrip(t) {
   t.emoji = t.emoji || '✈️';
   t.places = t.places || '';
@@ -87,8 +100,10 @@ function normalizeTrip(t) {
       if (!it.cat) it.cat = guessCat(it.title);
       if (it.dur == null) it.dur = '';
       if (it.cost == null) it.cost = '';
+      if (it.ticketUrl == null) it.ticketUrl = '';
     }
   }
+  autoLinkBookings(t);
   t.budget = t.budget || {};
   t.budget.rate = t.budget.rate || 1;
   t.budget.plan = t.budget.plan || {};
@@ -1051,14 +1066,59 @@ function legForm(a, b) {
   update();
 }
 
+/* ---------- 입장권 ---------- */
+
+// http(s)로 시작하지 않으면 붙여 준다 (javascript: 같은 주소는 막기)
+function cleanUrl(u) {
+  u = String(u || '').trim();
+  if (!u) return '';
+  return /^https?:\/\//i.test(u) ? u : 'https://' + u.replace(/^[a-z]+:\/*/i, '');
+}
+
+// 카드 아래 입장권 버튼: 내 예매 링크 > 공식 예매처 > (관광·액티비티만) 입장권 찾기
+function ticketLinks(it) {
+  const a = (url, label) => `<a class="map-btn ticket-btn" href="${esc(url)}" target="_blank" rel="noopener" data-act="link">${label}</a>`;
+  if (it.ticketUrl) return a(it.ticketUrl, '🎟 내 예매 링크 ›');
+  const official = sightsOf(it).filter((s) => s.url);
+  if (official.length === 1) return a(official[0].url, '🎟 공식 예매처 ›');
+  if (official.length) return official.map((s) => a(s.url, `🎟 ${esc(s.name)} 공식 ›`)).join('');
+  if (it.cat !== '관광' && it.cat !== '액티비티') return '';
+  if (/산책|해변|전망대|일몰|휴식|드라이브|광장|지구|거리/.test(it.title || '')) return ''; // 보통 입장권이 없는 곳
+  const q = `${it.place || it.title} official tickets`;
+  return a(`https://www.google.com/search?q=${encodeURIComponent(q)}`, '🎟 입장권 찾기 ›');
+}
+
+// 연결된 예약 → 예약번호 표시 (누르면 예약 수정)
+function bookingChip(trip, it) {
+  const b = it.bookingId && trip.bookings.find((x) => x.id === it.bookingId);
+  if (!b) return '';
+  return `<button type="button" class="book-chip ${b.code ? '' : 'empty'}" data-act="open-book" data-id="${b.id}">📄 ${b.code ? '예약번호 ' + esc(b.code) : '예약번호 미입력'}</button>`;
+}
+
+// 예전 데이터: 같은 관광지·같은 날(또는 날짜 없는) 예약이 하나뿐이면 한 번만 자동 연결. 이후엔 사용자가 정한 대로.
+function autoLinkBookings(t) {
+  for (const d of t.days) {
+    for (const it of d.items) {
+      if ('bookingId' in it) continue;
+      it.bookingId = '';
+      const sights = sightsOf(it);
+      if (!sights.length) continue;
+      const hits = t.bookings.filter((b) => (!b.date || b.date === d.date) && sights.some((s) => s.re.test(b.title || '')));
+      if (hits.length === 1) it.bookingId = hits[0].id;
+    }
+  }
+}
+
 function timelineItem(trip, it, i, clash) {
   const c = ITEM_CATS[it.cat] || ITEM_CATS['기타'];
   const when = [it.time, it.dur].filter(Boolean).join(' · ');
   const cost = Number(it.cost) || 0;
   const link = mapLink(trip, it);
+  const links = ticketLinks(it) + (link ? `<a class="map-btn" href="${link.url}" target="_blank" rel="noopener" data-act="link">${link.label}</a>` : '');
   const foot = (it.place ? `<span class="tl2-place">${hasPos(it) ? '📍' : '◌'} ${esc(it.place)}</span>` : '')
     + (cost ? `<span class="tl2-cost">💰 ${money(cost, trip.currency)}</span>` : '')
-    + (link ? `<a class="map-btn" href="${link.url}" target="_blank" rel="noopener" data-act="link">${link.label}</a>` : '');
+    + bookingChip(trip, it)
+    + (links ? `<span class="tl2-links">${links}</span>` : '');
   return `
     <li class="tl2 ${it.done ? 'done' : ''}" style="--cat:${c.color}">
       <span class="tl2-dot" title="${esc(it.cat)}">${c.icon}<span class="tl2-num">${i + 1}</span></span>
@@ -1104,7 +1164,7 @@ function itemForm(item) {
   const trip = detailTrip();
   const curDay = currentDay();
   const isNew = !item;
-  item = item || { id: uid(), time: '', dur: '', title: '', place: '', memo: '', cat: '관광', cost: '', done: false };
+  item = item || { id: uid(), time: '', dur: '', title: '', place: '', memo: '', cat: '관광', cost: '', ticketUrl: '', bookingId: '', done: false };
   const dayChips = trip.days.map((d, i) => {
     const dt = parseDate(d.date);
     return `<label class="pick-chip"><input type="radio" name="date" value="${d.date}" ${d.date === curDay.date ? 'checked' : ''}>
@@ -1112,6 +1172,8 @@ function itemForm(item) {
   }).join('');
   const catChips = Object.entries(ITEM_CATS).map(([k, c]) =>
     `<label class="pick-chip cat"><input type="radio" name="cat" value="${k}" ${k === item.cat ? 'checked' : ''}><span>${c.icon} ${k}</span></label>`).join('');
+  const bookOpts = [...trip.bookings].sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999')).map((b) =>
+    `<option value="${b.id}" ${b.id === item.bookingId ? 'selected' : ''}>${BOOK_TYPES[b.type] || '📄'} ${esc(b.title)}${b.date ? ' · ' + fmtDate(b.date) : ''}${b.code ? ' · ' + esc(b.code) : ''}</option>`).join('');
   openModal({
     title: isNew ? '장소 추가' : '일정 수정',
     html: `
@@ -1145,12 +1207,20 @@ function itemForm(item) {
       </div>
       ${fieldHtml({ name: 'memo', label: '✏️ 메모 / 할 일', type: 'textarea', value: item.memo })}
       <div class="field"><span>분류</span><div class="pick-wrap">${catChips}</div></div>
-      ${fieldHtml({ name: 'cost', label: `💰 예상 경비 (${trip.currency})`, type: 'number', value: item.cost })}`,
+      ${fieldHtml({ name: 'cost', label: `💰 예상 경비 (${trip.currency})`, type: 'number', value: item.cost })}
+      ${fieldHtml({ name: 'ticketUrl', label: '🎟 예매 링크 (있으면 카드 버튼이 이 링크를 열어요)', type: 'url', value: item.ticketUrl || '', placeholder: 'https://' })}
+      <label class="field"><span>📄 연결할 예약 (예약 탭)</span>
+        <select name="bookingId">
+          <option value="">연결 안 함</option>
+          ${bookOpts}
+        </select>
+      </label>`,
     onSave: (d) => {
       const cost = parseFloat(d.cost);
       Object.assign(item, {
         time: d.time, dur: d.dur, title: d.title, place: d.place, memo: d.memo,
         cat: d.cat || '기타', cost: cost > 0 ? cost : '',
+        ticketUrl: cleanUrl(d.ticketUrl), bookingId: d.bookingId || '',
       });
       if (d.lat !== '' && d.lng !== '') { item.lat = Number(d.lat); item.lng = Number(d.lng); delete item.geo; }
       else { delete item.lat; delete item.lng; delete item.geo; }
@@ -1565,7 +1635,10 @@ function bookForm(trip, b) {
       { name: 'memo', label: '메모 (주소, 체크인 시간, 좌석 등)', type: 'textarea', value: b.memo },
     ],
     onSave: (d) => { Object.assign(b, d); if (isNew) trip.bookings.push(b); },
-    onDelete: isNew ? null : () => { trip.bookings = trip.bookings.filter((x) => x !== b); },
+    onDelete: isNew ? null : () => {
+      trip.bookings = trip.bookings.filter((x) => x !== b);
+      for (const d of trip.days) for (const it of d.items) if (it.bookingId === b.id) it.bookingId = ''; // 일정 연결도 풀기
+    },
   });
 }
 
@@ -1705,6 +1778,7 @@ $('#view').addEventListener('click', (ev) => {
     case 'edit-exp': expForm(ft, ft.expenses.find((x) => x.id === id)); break;
     case 'add-book': bookForm(ft, null); break;
     case 'edit-book': bookForm(ft, ft.bookings.find((x) => x.id === id)); break;
+    case 'open-book': { const t = detailTrip(); bookForm(t, t.bookings.find((x) => x.id === id)); break; } // 일정 카드의 예약번호
     case 'add-contact': contactForm(ft, null); break;
     case 'edit-contact': contactForm(ft, ft.contacts.find((x) => x.id === id)); break;
   }
