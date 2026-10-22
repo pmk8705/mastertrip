@@ -957,6 +957,8 @@ function itemForm(item) {
         <input type="hidden" name="lng" value="${hasPos(item) ? item.lng : ''}">
         <div id="placeStatus" class="small muted place-status">${hasPos(item) ? '📍 위치 저장됨 (지도에 표시돼요)' : '검색해서 후보를 고르면 지도에 표시돼요'}</div>
         <div id="placeResults"></div>
+        <a class="map-find" id="mapFindBtn" target="_blank" rel="noopener"></a>
+        <div class="small muted map-find-tip">정확한 이름을 모르면 지도에서 찾은 뒤, 이름을 복사해 붙여넣고 [검색]을 누르세요.</div>
       </div>
       ${fieldHtml({ name: 'title', label: '이름 / 할 일', value: item.title, required: true, placeholder: '예: 사그라다 파밀리아 관람' })}
       <div class="field"><span>⏰ 방문 시간</span>
@@ -995,7 +997,7 @@ function itemForm(item) {
   });
   const checked = $('#modalBody input[name=date]:checked');
   if (checked) checked.parentElement.scrollIntoView({ inline: 'center', block: 'nearest' });
-  wirePlaceSearch(curDay);
+  wirePlaceSearch(trip, curDay);
   wireTimeWheel(item, curDay, isNew);
 }
 
@@ -1079,15 +1081,50 @@ function wireTimeWheel(item, day, isNew) {
   });
 }
 
-function wirePlaceSearch(day) {
+// 구글 지도 '긴 주소'에서 위치 꺼내기 (짧은 공유 링크는 웹앱에서 열어볼 수 없음)
+function posFromMapUrl(text) {
+  const m = text.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || text.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/)
+    || text.match(/[?&](?:q|query|ll|center)=(-?\d+\.\d+)(?:,|%2C)(-?\d+\.\d+)/i);
+  if (!m) return null;
+  const name = (text.match(/\/place\/([^/@?]+)/) || [])[1];
+  return { lat: Number(m[1]), lng: Number(m[2]), name: name ? decodeURIComponent(name.replace(/\+/g, ' ')) : '' };
+}
+
+function wirePlaceSearch(trip, day) {
   const form = $('#modalForm');
   const input = form.place;
   const status = $('#placeStatus');
   const results = $('#placeResults');
   const setPos = (lat, lng) => { form.lat.value = lat; form.lng.value = lng; };
+
+  // 지도 사이트에서 찾아보기 (국내 = 네이버, 해외 = 구글). 입력이 비어 있으면 그날 도시 지도
+  const findBtn = $('#mapFindBtn');
+  const updateFind = () => {
+    const q = input.value.trim() || firstCity(day) || trip.places.split('·')[0].trim() || trip.title;
+    const link = mapLink(trip, { place: q });
+    findBtn.href = link.url;
+    findBtn.textContent = (trip.region === '국내' ? '🟢 네이버 지도에서 찾아보기' : '📍 구글 지도에서 찾아보기') + ' ›';
+  };
+  updateFind();
+  input.addEventListener('input', updateFind);
+
   const search = async () => {
     const q = input.value.trim();
     if (!q) return;
+    if (/maps\.app\.goo\.gl|goo\.gl\/maps|naver\.me\//i.test(q)) {
+      status.textContent = '짧은 공유 링크는 열어볼 수 없어요. 지도에서 장소 이름을 복사해 붙여넣어 주세요.';
+      return;
+    }
+    const fromUrl = /^https?:\/\//i.test(q) && posFromMapUrl(q);
+    if (fromUrl) {
+      setPos(fromUrl.lat, fromUrl.lng);
+      input.value = fromUrl.name || `${fromUrl.lat.toFixed(5)}, ${fromUrl.lng.toFixed(5)}`;
+      if (!form.title.value.trim() && fromUrl.name) form.title.value = fromUrl.name;
+      status.textContent = '📍 지도 주소에서 위치를 가져왔어요';
+      results.innerHTML = '';
+      updateFind();
+      return;
+    }
     if (!navigator.onLine) { status.textContent = '인터넷 연결이 필요해요'; return; }
     status.textContent = '검색 중…';
     results.innerHTML = '';

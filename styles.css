@@ -504,3 +504,10 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 .dur-input {
   width: 100%; margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; background: var(--bg); font-size: 16px;
 }
+
+/* 장소 검색 아래: 지도 사이트에서 찾아보기 */
+.map-find {
+  display: inline-block; margin-top: 10px; padding: 8px 14px; border-radius: 99px; text-decoration: none;
+  font-size: 14px; font-weight: 700; background: var(--surface-2); color: var(--text);
+}
+.map-find-tip { margin-top: 6px; }
