@@ -92,6 +92,7 @@ function normalizeTrip(t) {
   t.emoji = t.emoji || '✈️';
   t.places = t.places || '';
   t.region = t.region || '해외';
+  t.people = t.people || 2; // 여행 인원 (숙소·항공 찾기)
   t.currency = t.currency || (t.region === '국내' ? 'KRW' : 'EUR');
   for (const k of ['days', 'checklist', 'expenses', 'bookings', 'contacts']) if (!Array.isArray(t[k])) t[k] = [];
   for (const d of t.days) {
@@ -614,7 +615,7 @@ function renderRecords() {
 
 function tripForm(trip) {
   const isNew = !trip;
-  const t = trip || { emoji: '✈️', title: '', places: '', start: '', end: '', region: '해외', currency: 'EUR', budget: { rate: '' } };
+  const t = trip || { emoji: '✈️', title: '', places: '', start: '', end: '', region: '해외', currency: 'EUR', budget: { rate: '' }, people: 2 };
   openModal({
     title: isNew ? '새 여행 만들기' : '여행 정보 수정',
     html: `<div class="field-row emoji-row">${fieldHtml({ name: 'emoji', label: '아이콘', value: t.emoji })}${fieldHtml({ name: 'title', label: '여행 이름', value: t.title, required: true, placeholder: '예: 제주도 힐링 여행' })}</div>`,
@@ -622,6 +623,7 @@ function tripForm(trip) {
       { name: 'places', label: '여행지 (도시)', value: t.places, placeholder: '예: 제주시 · 서귀포' },
       { name: 'start', label: '출발일', type: 'date', value: t.start, required: true },
       { name: 'end', label: '도착일 (돌아오는 날)', type: 'date', value: t.end, required: true },
+      { name: 'people', label: '인원 (숙소·항공 찾기에 쓰여요)', type: 'number', value: t.people },
       { name: 'region', label: '지역', type: 'select', options: ['해외', '국내'], value: t.region },
       { name: 'currency', label: '현지 통화 (해외)', value: t.currency, list: CURRENCIES, placeholder: '예: EUR, USD, JPY' },
       { name: 'rate', label: '환율: 현지 통화 1단위 = ?원 (해외)', type: 'number', value: t.region === '국내' ? '' : t.budget.rate },
@@ -634,11 +636,12 @@ function tripForm(trip) {
       if (d.region === '국내' || currency === 'KRW') { currency = 'KRW'; rate = 1; }
       else if (!currency) { toast('현지 통화를 입력하세요'); return false; }
       else if (!(rate > 0)) { toast('환율을 입력하세요'); return false; }
+      const people = Math.min(9, Math.max(1, Math.round(Number(d.people)) || 2)); // 아고다·스카이스캐너 검색 인원 (1~9명)
 
       if (isNew) {
         const tpl = newTripTemplate(d.region);
         const nt = normalizeTrip({
-          id: 'trip-' + uid(), title: d.title, emoji: d.emoji || '✈️', places: d.places, region: d.region,
+          id: 'trip-' + uid(), title: d.title, emoji: d.emoji || '✈️', places: d.places, region: d.region, people,
           currency, start: d.start, end: d.end, days: buildDays(d.start, d.end, []),
           checklist: tpl.checklist, contacts: tpl.contacts,
           budget: { rate, plan: Object.fromEntries(CATS.map((k) => [k, 0])) },
@@ -656,7 +659,7 @@ function tripForm(trip) {
         if (lost.length && !confirm(`바뀐 기간에서 빠지는 날의 일정 ${lost.reduce((s, x) => s + x.items.length, 0)}개가 지워집니다. 계속할까요?`)) return false;
         trip.days = buildDays(d.start, d.end, trip.days);
       }
-      Object.assign(trip, { title: d.title, emoji: d.emoji || '✈️', places: d.places, region: d.region, currency, start: d.start, end: d.end });
+      Object.assign(trip, { title: d.title, emoji: d.emoji || '✈️', places: d.places, region: d.region, people, currency, start: d.start, end: d.end });
       applyCoverChoice(trip.id);
       trip.budget.rate = rate;
     },
@@ -1593,7 +1596,6 @@ const BOOK_TYPES = { 항공: '✈️', 숙소: '🏨', 교통: '🚆', 관광: '
 /* ---------- 숙소·항공 찾기 (아고다 · 스카이스캐너) ---------- */
 // 2026-10-23 확인: 아고다는 도시 이름 검색 주소가 홈으로 돌아가서 아고다 도시 번호가 필요 (아고다 검색창 제안 목록에서 찾은 값).
 // 스카이스캐너는 /transport/flights/출발/도착/YYMMDD/ (공항 코드, 여러 공항 도시는 스카이스캐너 도시 코드).
-const SEARCH_ADULTS = 2;
 const AGODA_CITY = {
   세비야: 16577, 그라나다: 9170, 마요르카: 16716, 팔마: 16716, 바르셀로나: 2002, 마드리드: 5531, 말라가: 73929, 발렌시아: 1623,
   리스본: 16364, 포르투: 8738, 파리: 15470, 로마: 16594, 런던: 233, 도쿄: 5085, 오사카: 9590, 후쿠오카: 16527,
@@ -1616,14 +1618,14 @@ function bookSearchLink(trip, b) {
     const city = findCity(b.title, AGODA_CITY) || (day && findCity(dayCities(day).slice(-1)[0] || '', AGODA_CITY));
     const nights = Number((b.title.match(/(\d+)\s*박/) || [])[1]) || 1;
     if (!city) return a('https://www.agoda.com/ko-kr/', '🏨 아고다에서 숙소 찾기 ›');
-    const q = `city=${AGODA_CITY[city]}&checkIn=${b.date}&checkOut=${addDays(b.date, nights)}&rooms=1&adults=${SEARCH_ADULTS}&children=0`;
+    const q = `city=${AGODA_CITY[city]}&checkIn=${b.date}&checkOut=${addDays(b.date, nights)}&rooms=1&adults=${trip.people || 2}&children=0`;
     return a(`https://www.agoda.com/ko-kr/search?${q}`, `🏨 아고다에서 ${esc(city)} ${nights}박 찾기 ›`);
   }
   if (b.type === '항공') {
     const [from, to] = b.title.split(/→|->|~/).map((x) => findCity(x || '', AIRPORT));
     if (!from || !to) return a('https://www.skyscanner.co.kr/', '✈️ 스카이스캐너에서 찾기 ›');
     const yymmdd = b.date.slice(2).replace(/-/g, '');
-    return a(`https://www.skyscanner.co.kr/transport/flights/${AIRPORT[from]}/${AIRPORT[to]}/${yymmdd}/?adultsv2=${SEARCH_ADULTS}&cabinclass=economy&rtn=0`, `✈️ 스카이스캐너에서 항공권 찾기 ›`);
+    return a(`https://www.skyscanner.co.kr/transport/flights/${AIRPORT[from]}/${AIRPORT[to]}/${yymmdd}/?adultsv2=${trip.people || 2}&cabinclass=economy&rtn=0`, `✈️ 스카이스캐너에서 항공권 찾기 ›`);
   }
   return '';
 }
