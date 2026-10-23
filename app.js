@@ -1590,6 +1590,44 @@ function planForm(trip) {
 /* ============ 예약·서류 ============ */
 const BOOK_TYPES = { 항공: '✈️', 숙소: '🏨', 교통: '🚆', 관광: '🎟️', 식당: '🍽️', 보험: '🛡️', 기타: '📄' };
 
+/* ---------- 숙소·항공 찾기 (아고다 · 스카이스캐너) ---------- */
+// 2026-10-23 확인: 아고다는 도시 이름 검색 주소가 홈으로 돌아가서 아고다 도시 번호가 필요 (아고다 검색창 제안 목록에서 찾은 값).
+// 스카이스캐너는 /transport/flights/출발/도착/YYMMDD/ (공항 코드, 여러 공항 도시는 스카이스캐너 도시 코드).
+const SEARCH_ADULTS = 2;
+const AGODA_CITY = {
+  세비야: 16577, 그라나다: 9170, 마요르카: 16716, 팔마: 16716, 바르셀로나: 2002, 마드리드: 5531, 말라가: 73929, 발렌시아: 1623,
+  리스본: 16364, 포르투: 8738, 파리: 15470, 로마: 16594, 런던: 233, 도쿄: 5085, 오사카: 9590, 후쿠오카: 16527,
+  방콕: 9395, 다낭: 16440, 서울: 14690, 부산: 17172, 제주: 16901, 강릉: 19041, 속초: 17236, 경주: 17179, 여수: 213193,
+};
+const AIRPORT = {
+  인천: 'icn', 김포: 'gmp', 서울: 'sela', 부산: 'pus', 김해: 'pus', 제주: 'cju',
+  세비야: 'svq', 그라나다: 'grx', 마요르카: 'pmi', 팔마: 'pmi', 바르셀로나: 'bcn', 마드리드: 'mad', 말라가: 'agp', 발렌시아: 'vlc',
+  리스본: 'lis', 포르투: 'opo', 파리: 'pari', 로마: 'rome', 런던: 'lond', 도쿄: 'tyoa', 오사카: 'osaa', 후쿠오카: 'fuk', 방콕: 'bkk', 다낭: 'dad',
+};
+// 글자 안에서 아는 도시 이름 찾기 (앞에 나온 것부터)
+const findCity = (text, table) => Object.keys(table).filter((k) => text.includes(k)).sort((a, b) => text.indexOf(a) - text.indexOf(b))[0];
+
+function bookSearchLink(trip, b) {
+  if (!b.date) return '';
+  const a = (url, label) => `<a class="book-search" href="${url}" target="_blank" rel="noopener" data-act="link">${label}</a>`;
+  if (b.type === '숙소') {
+    // 도시: 예약 이름 → 없으면 그날 도시 칸(“A → B”면 도착 도시)
+    const day = trip.days.find((d) => d.date === b.date);
+    const city = findCity(b.title, AGODA_CITY) || (day && findCity(dayCities(day).slice(-1)[0] || '', AGODA_CITY));
+    const nights = Number((b.title.match(/(\d+)\s*박/) || [])[1]) || 1;
+    if (!city) return a('https://www.agoda.com/ko-kr/', '🏨 아고다에서 숙소 찾기 ›');
+    const q = `city=${AGODA_CITY[city]}&checkIn=${b.date}&checkOut=${addDays(b.date, nights)}&rooms=1&adults=${SEARCH_ADULTS}&children=0`;
+    return a(`https://www.agoda.com/ko-kr/search?${q}`, `🏨 아고다에서 ${esc(city)} ${nights}박 찾기 ›`);
+  }
+  if (b.type === '항공') {
+    const [from, to] = b.title.split(/→|->|~/).map((x) => findCity(x || '', AIRPORT));
+    if (!from || !to) return a('https://www.skyscanner.co.kr/', '✈️ 스카이스캐너에서 찾기 ›');
+    const yymmdd = b.date.slice(2).replace(/-/g, '');
+    return a(`https://www.skyscanner.co.kr/transport/flights/${AIRPORT[from]}/${AIRPORT[to]}/${yymmdd}/?adultsv2=${SEARCH_ADULTS}&cabinclass=economy&rtn=0`, `✈️ 스카이스캐너에서 항공권 찾기 ›`);
+  }
+  return '';
+}
+
 function renderBook(trip) {
   const list = [...trip.bookings].sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
   const missing = list.filter((b) => !b.code).length;
@@ -1601,6 +1639,7 @@ function renderBook(trip) {
         <div class="${b.code ? 'book-code' : 'book-code empty'}">${b.code ? esc(b.code) : '예약번호 미입력'}</div>
         ${b.memo ? `<div class="muted small" style="white-space:pre-wrap">${esc(b.memo)}</div>` : ''}
         ${b.link ? `<a class="small" href="${esc(b.link)}" target="_blank" rel="noopener" data-act="link">🔗 예약 페이지</a>` : ''}
+        ${b.code ? '' : bookSearchLink(trip, b)}
       </div>
     </div>`).join('');
 
