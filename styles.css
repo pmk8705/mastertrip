@@ -315,7 +315,7 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 }
 .rcal-day.sun { color: var(--danger); }
 .rcal-day.today { font-weight: 800; text-decoration: underline; }
-.rcal-day.mid { background: var(--accent-soft); }
+.rcal-day.mid { background: color-mix(in srgb, var(--accent) 38%, transparent); font-weight: 700; } /* 밝은·어두운 화면 모두에서 또렷하게 */
 .rcal-day.start, .rcal-day.end { background: var(--accent); color: var(--on-accent); font-weight: 800; }
 .rcal-day.start { border-radius: 10px 0 0 10px; }
 .rcal-day.end { border-radius: 0 10px 10px 0; }
