@@ -702,3 +702,21 @@ body.viewer-open { overflow: hidden; }
 .calc-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; }
 .calc-row input { font: inherit; font-size: 18px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); min-width: 0; }
 .calc-row b { font-size: 18px; }
+
+/* 기록: 발자취 지도 */
+.foot-card { padding: 0; overflow: hidden; }
+.foot-head { padding: 10px 14px; gap: 8px; }
+.foot-head b { white-space: nowrap; flex: 0 0 auto; }
+.foot-head .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#footMap { height: 300px; background: var(--surface-2); }
+.city-pin span {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-weight: 800; font-size: 13px; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+}
+.city-pin b {
+  position: absolute; left: 30px; top: 3px; white-space: nowrap;
+  font-size: 13px; color: #222; background: rgba(255, 255, 255, .92); padding: 1px 6px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0, 0, 0, .2);
+}
+.city-pin.left b { left: auto; right: 30px; }
+.city-pin.below b { left: 50%; top: 30px; transform: translateX(-50%); }
+.mode-pin { display: grid !important; place-items: center; font-size: 15px; background: #fff; border-radius: 50%; box-shadow: 0 1px 4px rgba(0, 0, 0, .3); }

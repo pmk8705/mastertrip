@@ -679,6 +679,7 @@ function render() {
     if (!t) view.innerHTML = renderNoTrip();
     else view.innerHTML = tripSwitchRow(t) + (subTab === 'check' ? renderCheck(t) : subTab === 'budget' ? renderBudget(t) : renderBook(t));
   }
+  if (mainTab === 'records' && focusTrip()) mountFootprint(focusTrip());
   if (detail) {
     centerActiveChip(stripLeft);
     mountMap(detailTrip(), currentDay());
@@ -882,9 +883,96 @@ function renderRecords() {
         <span><b>${cities.size}</b>도시</span><span><b>${doneCnt}</b>곳 다녀옴</span><span><b>${won(spent)}</b>지출</span>
       </div>
     </div>
+    ${footprintHtml(t)}
     ${days.map(([d, i]) => recordDay(t, d, i)).join('')
       || `<div class="empty-state">여행이 시작되면 하루마다 기록 카드가 생겨요.<br>${fmtDate(t.start)}부터</div>`}`;
 }
+/* ---------- 기록: 발자취 지도 (도시를 잇는 곡선 + 이동 수단 + 다녀온 곳 핀) ---------- */
+// 도시 위치: 날씨용 도시 위치(wx.geo, 도시 중심) → 없으면 그 도시에 머문 날 일정 위치들의 가운데
+function footCities(trip) {
+  const mid = (arr) => { const a = [...arr].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
+  return flowSegments(trip).filter((x) => x.city).map((x) => {
+    const g = wx.geo[x.city];
+    if (g && g.lat != null) return { ...x, lat: g.lat, lng: g.lng };
+    const pts = trip.days.filter((d) => x.dates.includes(d.date)).flatMap((d) => d.items.filter(hasPos));
+    return pts.length ? { ...x, lat: mid(pts.map((p) => p.lat)), lng: mid(pts.map((p) => p.lng)) } : { ...x };
+  });
+}
+// 도시 사이 이동 수단: 이동하는 날 일정(기차·항공 낱말, 직접 정한 수단) → 없으면 거리(350km 넘으면 비행기)
+function footMode(trip, a, b) {
+  const day = trip.days.find((d) => d.date === b.dates[0]);
+  for (const it of day ? day.items : []) {
+    const buf = departBuffer({ ...it, time: '00:00' });
+    if (buf) return buf.name === '비행기' ? '✈️' : '🚆';
+    if (it.move && it.move.mode === 'flight') return '✈️';
+    if (it.move && it.move.mode === 'train') return '🚆';
+  }
+  return distKm(a, b) > 350 ? '✈️' : '🚆';
+}
+let footGeoBusy = false;
+async function ensureFootGeo(trip) { // 위치를 모르는 도시는 한 번 찾아서 기억 (날씨와 같은 wx.geo)
+  if (footGeoBusy || !navigator.onLine || Date.now() - wxFailAt < 5 * 60e3) return;
+  const todo = footCities(trip).filter((c) => c.lat == null && !wx.geo[c.city]);
+  if (!todo.length) return;
+  footGeoBusy = true;
+  try {
+    for (const c of todo) wx.geo[c.city] = await wxGeocode(c.city, wxCenter(trip));
+    saveWx();
+  } catch (e) { console.warn('도시 위치 찾기 실패', e); wxFailAt = Date.now(); }
+  footGeoBusy = false;
+  if (mainTab === 'records') render();
+}
+function footprintHtml(trip) {
+  const cities = footCities(trip);
+  if (cities.length < 2) return '';
+  if (!navigator.onLine) return '<div class="map-note">발자취 지도는 인터넷이 연결되면 보여요</div>';
+  return `<div class="card foot-card"><div class="row foot-head"><b>🗺 발자취</b><span class="spacer"></span>
+    <span class="muted small">${cities.map((c) => esc(c.city)).join(' → ')}</span></div><div id="footMap"></div></div>`;
+}
+function mountFootprint(trip) {
+  const el = $('#footMap');
+  if (!el || typeof L === 'undefined') return;
+  const cities = footCities(trip).filter((c) => c.lat != null);
+  if (cities.length < 2) { ensureFootGeo(trip); return; }
+  ensureFootGeo(trip); // 일부만 아는 경우 나머지도
+  // 페이지를 쓸어 내릴 때 지도가 손가락을 잡지 않게 끌기는 끄고, 두 손가락 확대·버튼만
+  leafletMap = L.map(el, { dragging: false, scrollWheelZoom: false, tap: false });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(leafletMap);
+  const bounds = [];
+  const modes = []; // 지도 크기가 정해진 뒤 붙인다 (가까운 도시 사이엔 아이콘이 이름을 가려서 뺌)
+  cities.forEach((c, i) => {
+    bounds.push([c.lat, c.lng]);
+    if (!i) return;
+    // 앞 도시 → 이 도시: 옆으로 살짝 휜 곡선(2차 베지어) + 가운데에 이동 수단
+    const a = cities[i - 1];
+    const ctl = { lat: (a.lat + c.lat) / 2 - (c.lng - a.lng) * 0.2, lng: (a.lng + c.lng) / 2 + (c.lat - a.lat) * 0.2 };
+    const at = (t) => [(1 - t) ** 2 * a.lat + 2 * (1 - t) * t * ctl.lat + t * t * c.lat, (1 - t) ** 2 * a.lng + 2 * (1 - t) * t * ctl.lng + t * t * c.lng];
+    L.polyline(Array.from({ length: 25 }, (_, k) => at(k / 24)), { color: '#FF7A00', weight: 3, dashArray: '6 8', interactive: false }).addTo(leafletMap);
+    modes.push({ a, c, pos: at(0.5), mode: footMode(trip, a, c) });
+  });
+  // 다녀온 곳(완료 체크 + 위치 있는 일정)
+  for (const d of trip.days) for (const it of d.items) {
+    if (!it.done || !hasPos(it)) continue;
+    const col = (ITEM_CATS[it.cat] || ITEM_CATS['기타']).color;
+    L.circleMarker([it.lat, it.lng], { radius: 6, color: '#fff', weight: 2, fillColor: col, fillOpacity: 1 }).addTo(leafletMap).bindPopup(`<b>${esc(it.title)}</b><br>${fmtDate(d.date)}`);
+  }
+  // 도시 이름이 핀 오른쪽에 붙으니 오른쪽 여백을 넉넉히
+  leafletMap.fitBounds(bounds, { paddingTopLeft: [30, 30], paddingBottomRight: [95, 30], maxZoom: 9 });
+  // 도시 핀 + 이름. 오른쪽 가까이에 다른 도시가 있으면 이름을 왼쪽에 (겹치지 않게)
+  const px = cities.map((c) => leafletMap.latLngToContainerPoint([c.lat, c.lng]));
+  cities.forEach((c, i) => {
+    const crowded = px.some((q, j) => j !== i && q.x > px[i].x && q.x - px[i].x < 150 && Math.abs(q.y - px[i].y) < 30);
+    const side = !crowded ? '' : px[i].x > 110 ? ' left' : ' below'; // 왼쪽에 자리가 없으면 아래로
+    const icon = L.divIcon({ className: `city-pin${side}`, html: `<span>${i + 1}</span><b>${esc(c.city)}</b>`, iconSize: [26, 26], iconAnchor: [13, 13] });
+    L.marker([c.lat, c.lng], { icon, interactive: false, zIndexOffset: 500 }).addTo(leafletMap);
+  });
+  for (const m of modes) {
+    const px = leafletMap.latLngToContainerPoint([m.a.lat, m.a.lng]).distanceTo(leafletMap.latLngToContainerPoint([m.c.lat, m.c.lng]));
+    if (px < 110) continue;
+    L.marker(m.pos, { icon: L.divIcon({ className: 'mode-pin', html: m.mode, iconSize: [26, 26], iconAnchor: [13, 13] }), interactive: false }).addTo(leafletMap);
+  }
+}
+
 function recordDay(t, d, i) {
   const done = d.items.filter((x) => x.done);
   const exps = t.expenses.filter((e) => e.date === d.date);
