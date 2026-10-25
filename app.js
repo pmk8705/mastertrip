@@ -1199,6 +1199,7 @@ function renderDays(trip) {
     ? day.items.map((it, i) => (i ? legHtml(day.items[i - 1], it) : '') + timelineItem(trip, it, i, clash.has(it.id))).join('')
     : '<li class="empty-state">아직 일정이 없어요</li>';
   const hasLeg = day.items.some((it, i) => i && travelLeg(day.items[i - 1], it));
+  const hasDepart = day.items.some(departBuffer);
 
   return `
     ${flowHtml(trip)}
@@ -1223,7 +1224,7 @@ function renderDays(trip) {
       <ul class="timeline2">${items}</ul>
     </div>
     <button class="add-btn" data-act="add-item">+ 장소 추가</button>
-    <p class="muted small" style="text-align:center;margin-top:14px">일정을 누르면 수정, 좌우로 밀면 다른 날로 넘어가요.<br>왼쪽 동그라미를 잡고 위아래로 끌면 순서가 바뀌어요.${hasLeg ? '<br>“자동” 이동 시간은 직선거리 어림값이에요. 이동 줄을 눌러 수단·시간을 정할 수 있어요.' : ''}</p>`;
+    <p class="muted small" style="text-align:center;margin-top:14px">일정을 누르면 수정, 좌우로 밀면 다른 날로 넘어가요.<br>왼쪽 동그라미를 잡고 위아래로 끌면 순서가 바뀌어요.${hasLeg ? '<br>“자동” 이동 시간은 직선거리 어림값이에요. 이동 줄을 눌러 수단·시간을 정할 수 있어요.' : ''}${hasDepart ? '<br>기차·비행기 일정의 시간은 출발 시각으로 보고, 역 30분·공항 2시간 전 도착 여유를 확인해요.' : ''}</p>`;
 }
 
 /* ---------- 시간 겹침 ---------- */
@@ -1323,22 +1324,40 @@ function travelLeg(a, b) {
 }
 
 // 두 일정 사이 줄. 누르면 수단·시간을 정하는 창
+// 기차·비행기 일정('이동' 분류 + 이름·메모에 낱말, '…도착' 일정 제외)은 그 시간을 출발 시각으로 보고
+// 역·공항에 미리 가 있을 여유(기차 30분, 비행기 2시간)가 있는지 본다.
+const DEPART_BUFFER = [
+  { re: /비행|항공|flight/i, min: 120, name: '비행기', place: '공항' },
+  { re: /기차|열차|렌페|Renfe|AVE|KTX|SRT|TGV|고속철|train/i, min: 30, name: '기차', place: '역' },
+];
+function departBuffer(it) {
+  if (it.cat !== '이동' || !isHHMM(it.time) || /도착/.test(it.title)) return null;
+  const text = `${it.title} ${it.memo || ''}`;
+  return DEPART_BUFFER.find((d) => d.re.test(text)) || null;
+}
 function legHtml(a, b) {
   const leg = travelLeg(a, b);
-  if (!leg || (!leg.manual && leg.km < 0.05)) return '';
   const ra = itemRange(a), rb = itemRange(b);
   const gap = ra && rb ? rb.start - ra.end : null;
+  const buf = departBuffer(b);
+  const spare = buf && gap != null ? gap - ((leg && leg.min) || 0) : null; // 역·공항에 도착한 뒤 남는 시간
+  const bufWarn = spare != null && spare < buf.min
+    ? `⚠ ${buf.name} 출발 ${fmtMin(buf.min)} 전에는 ${buf.place}에 있는 게 좋아요 (지금 여유 ${spare > 0 ? fmtMin(spare) : '없음'})` : '';
+  if (!leg || (!leg.manual && leg.km < 0.05)) {
+    return bufWarn ? `<li class="tl2-leg tight"><span class="leg-warn">${bufWarn}</span></li>` : '';
+  }
   // 자동일 때는 '이동' 일정이 끼었거나 장거리면 경고하지 않음 (그 일정 자체가 이동이라 헛경고). 직접 정했으면 항상 확인
   const skip = !leg.manual && (a.cat === '이동' || b.cat === '이동' || leg.km > 30);
-  const tight = !skip && leg.min != null && gap != null && gap >= 0 && leg.min > gap;
+  const tight = !bufWarn && !skip && leg.min != null && gap != null && gap >= 0 && leg.min > gap;
   const parts = [`${leg.icon} ${esc(leg.name)}`];
   if (leg.min != null) parts.push(`${leg.manual && b.move.min != null && b.move.min !== '' ? '' : '약 '}${fmtMin(leg.min)}`);
   if (leg.km != null) parts.push(fmtDist(leg.km));
   return `
-    <li class="tl2-leg ${tight ? 'tight' : ''} ${leg.manual ? 'set' : 'auto'}">
+    <li class="tl2-leg ${tight || bufWarn ? 'tight' : ''} ${leg.manual ? 'set' : 'auto'}">
       <button class="leg-text" data-act="edit-leg" data-id="${b.id}">${parts.join(' · ')}${leg.manual ? '' : ' <span class="leg-auto">자동</span>'} <span class="leg-edit">✎</span></button>
       ${leg.memo ? `<div class="leg-memo">${esc(leg.memo)}</div>` : ''}
       ${tight ? `<span class="leg-warn">⚠ 이동 시간이 빠듯해요 (여유 ${fmtMin(gap)})</span>` : ''}
+      ${bufWarn ? `<span class="leg-warn">${bufWarn}</span>` : ''}
     </li>`;
 }
 
