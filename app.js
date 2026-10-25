@@ -935,10 +935,15 @@ function tripForm(trip) {
   if (!isNew) {
     $('#modalBody').insertAdjacentHTML('beforeend', `
       <div class="field"><span>함께 보기</span>
-        <button type="button" class="btn" id="shareTripBtn">📤 이 여행 보내기 (카톡 등)</button>
-        <div class="muted small" style="margin-top:4px">일정·예약·바우처가 파일 하나로 가요. 받는 사람은 설정 → 가져오기로 열면 이 여행만 추가돼요(이미 있으면 새 내용으로 바뀜).</div>
+        <div class="seg-btns">
+          <button type="button" class="btn" id="shareTripBtn">📤 공유 (카톡 등)</button>
+          <button type="button" class="btn" id="saveTripBtn">⬇ 파일로 저장</button>
+        </div>
+        <div class="muted small" style="margin-top:4px">일정·예약·바우처가 파일 하나로 가요. 공유로 파일이 안 가면 '파일로 저장' 후 카톡에서 + → 파일로 보내 주세요.
+          받는 사람은 설정 → 가져오기로 열면 이 여행만 추가돼요(이미 있으면 새 내용으로 바뀜).</div>
       </div>`);
     $('#shareTripBtn').onclick = () => shareTrip(trip);
+    $('#saveTripBtn').onclick = () => shareTrip(trip, true);
   }
 
   // 통화: 여행지 칸에서 나라·도시를 찾으면 자동 선택 (직접 고른 뒤로는 그대로). 국내면 통화·환율 칸을 숨긴다.
@@ -2258,14 +2263,16 @@ async function tripFileBlob(trip) {
   const data = { type: TRIP_FILE, v: 1, sentAt: new Date().toISOString(), trip, covers, vouchers };
   return new Blob([JSON.stringify(data)], { type: 'text/plain' });
 }
-async function shareTrip(trip) {
+// asFile: 공유창 대신 바로 파일로 저장 (카톡에서 + → 파일로 첨부)
+async function shareTrip(trip, asFile) {
   toast('보낼 파일을 만드는 중…');
   const blob = await tripFileBlob(trip);
   const name = `${trip.title.replace(/[\/:*?"<>|]/g, '').trim() || '여행'}.mastertrip.txt`;
   const file = new File([blob], name, { type: 'text/plain' });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+  if (!asFile && navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title: trip.title, text: 'MasterTrip 여행 파일이에요. 앱의 설정 → 가져오기로 열어 주세요.' });
+      // 파일만 보낸다: 글(text·title)을 같이 넣으면 카톡 등은 글만 받고 파일을 버린다
+      await navigator.share({ files: [file] });
       return;
     } catch (e) {
       if (e.name === 'AbortError') return; // 공유 창을 닫음
@@ -2279,7 +2286,7 @@ async function shareTrip(trip) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  toast('파일로 저장했어요. 카톡 등으로 보내 주세요');
+  toast('다운로드 폴더에 저장했어요. 카톡에서 + → 파일로 보내 주세요');
 }
 const restoreBlob = (url) => fetch(url).then((r) => r.blob());
 // 받은 여행 하나: 처음 받는 여행이면 추가, 이미 있는 여행(같은 id)이면 받은 내용으로 교체
