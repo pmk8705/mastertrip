@@ -794,7 +794,7 @@ function renderTripsList() {
     ${search}
     <div class="chips-row">${chips}</div>
     <button class="cta" data-act="new-trip">+ 새로운 여행 일정 만들기</button>
-    <label class="add-btn import-trip">📥 받은 여행 열기 (카톡으로 받은 파일)<input type="file" id="importTripInput" accept="application/pdf,.pdf,text/plain,.txt,application/json,.json" hidden></label>
+    <button type="button" class="add-btn import-trip" data-act="import-file">📥 받은 여행 열기 (카톡으로 받은 파일)</button>
     <div class="trip-list" id="tripList">${tripListHtml()}</div>`;
 }
 
@@ -2224,7 +2224,7 @@ function renderSettings() {
       <p class="small muted" style="margin-top:0">데이터는 이 폰 안에만 저장돼요. 폰을 바꾸거나 브라우저 데이터를 지우면 사라지니 가끔 내보내기로 백업하세요. 백업에는 모든 여행이 들어갑니다. 가져오기는 백업 파일과 받은 여행 파일(.mastertrip.pdf)을 모두 열 수 있어요.</p>
       <div class="row" style="flex-wrap:wrap">
         <button type="button" class="btn" data-act="export">⬇ 내보내기 (백업)</button>
-        <label class="btn" style="display:inline-block">⬆ 가져오기 <input type="file" id="importInput" accept="application/json,.json,text/plain,.txt,application/pdf,.pdf" hidden></label>
+        <button type="button" class="btn" data-act="import-file">⬆ 가져오기</button>
       </div>
     </div>
     <div class="section-title"><h3>데이터</h3></div>
@@ -2363,6 +2363,14 @@ async function importTrip(data) {
   toast(old ? '받은 내용으로 바꿨어요' : '여행을 추가했어요');
 }
 
+// 파일 고르기 칸은 화면(#view) 밖에 하나만 둔다: 고르는 동안 앱이 뒤로 갔다 오면 visibilitychange로 화면을
+// 다시 그리는데, 칸이 #view 안에 있으면 그때 사라져서 '골랐다' 신호를 못 받았다 (폰에서 받은 여행이 안 열리던 문제).
+const importPicker = Object.assign(document.createElement('input'), {
+  type: 'file', hidden: true, accept: 'application/pdf,.pdf,text/plain,.txt,application/json,.json',
+});
+document.body.append(importPicker);
+importPicker.addEventListener('change', (ev) => importData(ev));
+
 function importData(ev) {
   const file = ev.target.files[0];
   if (!file) return;
@@ -2370,7 +2378,10 @@ function importData(ev) {
   reader.onload = async () => {
     try {
       const data = await readTripFileText(reader.result);
-      if (data.type === TRIP_FILE && data.trip) { importTrip(data); return; }
+      if (data.type === TRIP_FILE && data.trip) {
+        await importTrip(data).catch((e) => { console.warn(e); toast(`여행을 열지 못했어요 (${e.message})`); });
+        return;
+      }
       const valid = Array.isArray(data.trips) || (data.trip && Array.isArray(data.days));
       if (!valid) throw new Error('형식 오류');
       if (!confirm('현재 데이터를 백업 파일 내용으로 바꿀까요?')) return;
@@ -2386,7 +2397,8 @@ function importData(ev) {
         .then(() => Promise.all(Object.entries(vouchers).map(([id, url]) => fetch(url).then((r) => r.blob()).then((b) => voucherDb.set(id, b)))))
         .catch((e) => console.warn('바우처 복원 실패', e));
     } catch (e) {
-      toast('올바른 백업·여행 파일이 아니에요');
+      console.warn('가져오기 실패', e);
+      toast(`MasterTrip 백업·여행 파일이 아니에요 (${file.name})`);
     }
   };
   reader.readAsText(file);
@@ -2426,6 +2438,7 @@ $('#view').addEventListener('click', (ev) => {
     case 'search-close': searchOpen = false; searchQuery = ''; render(); break;
     case 'goto-sub': pickTrip(id); mainTab = 'trips'; remember('main', mainTab); setSub(el.dataset.v); window.scrollTo(0, 0); break;
     case 'export': exportData(); break;
+    case 'import-file': importPicker.click(); break;
     case 'theme': setTheme(el.dataset.v); break;
     case 'reset': resetAll(); break;
     case 'open-trip': openTrip(id); break;
@@ -2464,7 +2477,6 @@ $('#view').addEventListener('input', (ev) => {
 
 $('#view').addEventListener('change', (ev) => {
   const el = ev.target;
-  if (el.id === 'importInput' || el.id === 'importTripInput') return importData(ev);
   if (el.dataset.act !== 'toggle-check') return;
   const c = focusTrip().checklist.find((x) => x.id === el.dataset.id);
   c.done = el.checked;
