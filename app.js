@@ -394,12 +394,21 @@ const isHHMM = (t) => /^\d{1,2}:\d{2}$/.test(t || '');
 const hhmm = (t) => t.padStart(5, '0');
 
 let toastTimer;
-function toast(msg) {
+// action = { label, run }: 알림 안에 버튼 하나 (5초간)
+function toast(msg, action) {
   const el = $('#toast');
   el.textContent = msg;
+  el.classList.toggle('has-act', !!action);
+  if (action) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = action.label;
+    b.onclick = () => { el.classList.remove('show'); action.run(); };
+    el.append(b);
+  }
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+  toastTimer = setTimeout(() => el.classList.remove('show'), action ? 5000 : 1800);
 }
 
 /* ============ 여행 표지 사진 · 바우처 (IndexedDB) ============ */
@@ -1109,9 +1118,21 @@ let geocoding = false;
 const hasPos = (it) => typeof it.lat === 'number' && typeof it.lng === 'number';
 
 // 국내 여행은 네이버 지도, 해외는 구글 지도 웹사이트로 (앱이 없어도 열림)
-function mapLink(trip, it) {
+// 인터넷이 없으면 웹 지도는 안 열리니 폰의 지도 앱으로 (미리 받아 둔 오프라인 지도를 쓸 수 있게).
+// 해외 = geo: (지도 앱 고르기), 국내 = 네이버 지도 앱. web=true면 항상 웹 (장소 찾기 버튼용)
+function mapLink(trip, it, web) {
   const q = it.place || (hasPos(it) ? `${it.lat},${it.lng}` : '');
   if (!q) return null;
+  if (!web && !navigator.onLine) {
+    const name = encodeURIComponent(it.title || it.place || '');
+    if (trip.region === '국내') {
+      const url = hasPos(it) ? `nmap://place?lat=${it.lat}&lng=${it.lng}&name=${name}&appname=pmk8705.github.io`
+        : `nmap://search?query=${encodeURIComponent(q)}&appname=pmk8705.github.io`;
+      return { url, label: '📱 네이버 지도 앱으로 보기 ›', app: true };
+    }
+    const url = hasPos(it) ? `geo:${it.lat},${it.lng}?q=${it.lat},${it.lng}(${name})` : `geo:0,0?q=${encodeURIComponent(q)}`;
+    return { url, label: '📱 지도 앱으로 보기 ›', app: true };
+  }
   if (trip.region === '국내') return { url: `https://m.map.naver.com/search?query=${encodeURIComponent(q)}`, label: '🟢 네이버 지도로 보기 ›' }; // map.naver.com은 폰에서 '앱으로 열기' 페이지로 넘어가므로 모바일 웹 주소
   return { url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`, label: '📍 구글 지도로 보기 ›' };
 }
@@ -1547,7 +1568,7 @@ function timelineItem(trip, it, i, clash) {
   const when = [it.time, it.dur].filter(Boolean).join(' · ');
   const cost = Number(it.cost) || 0;
   const link = mapLink(trip, it);
-  const links = ticketLinks(it) + (link ? `<a class="map-btn" href="${link.url}" target="_blank" rel="noopener" data-act="link">${link.label}</a>` : '');
+  const links = ticketLinks(it) + (link ? `<a class="map-btn" href="${link.url}"${link.app ? '' : ' target="_blank" rel="noopener"'} data-act="link">${link.label}</a>` : '');
   const foot = (it.place ? `<span class="tl2-place">${hasPos(it) ? '📍' : '◌'} ${esc(it.place)}</span>` : '')
     + (cost ? `<span class="tl2-cost">💰 ${money(cost, trip.currency)}</span>` : '')
     + bookingChip(trip, it)
@@ -1621,6 +1642,7 @@ function itemForm(item) {
         <input type="hidden" name="lat" value="${hasPos(item) ? item.lat : ''}">
         <input type="hidden" name="lng" value="${hasPos(item) ? item.lng : ''}">
         <div id="placeStatus" class="small muted place-status">${hasPos(item) ? '📍 위치 저장됨 (지도에 표시돼요)' : '검색해서 후보를 고르면 지도에 표시돼요'}</div>
+        <button type="button" class="link-btn" id="copyPosBtn" ${hasPos(item) ? '' : 'hidden'}>📋 좌표 복사 (다른 지도 앱에 붙여넣기)</button>
         <div id="placeResults"></div>
       </div>
       ${fieldHtml({ name: 'title', label: '이름 / 할 일', value: item.title, required: true, placeholder: '예: 사그라다 파밀리아 관람' })}
@@ -1789,13 +1811,18 @@ function wirePlaceSearch(trip, day) {
   const input = form.place;
   const status = $('#placeStatus');
   const results = $('#placeResults');
-  const setPos = (lat, lng) => { form.lat.value = lat; form.lng.value = lng; };
+  const copyBtn = $('#copyPosBtn');
+  const setPos = (lat, lng) => { form.lat.value = lat; form.lng.value = lng; copyBtn.hidden = lat === ''; };
+  copyBtn.onclick = async () => {
+    const text = `${form.lat.value}, ${form.lng.value}`;
+    try { await navigator.clipboard.writeText(text); toast(`좌표를 복사했어요 (${text})`); } catch (e) { prompt('아래 좌표를 길게 눌러 복사하세요', text); }
+  };
 
   // 지도 사이트에서 찾아보기 (국내 = 네이버, 해외 = 구글). 입력이 비어 있으면 그날 도시 지도
   const findBtn = $('#mapFindBtn');
   const updateFind = () => {
     const q = input.value.trim() || firstCity(day) || trip.places.split('·')[0].trim() || trip.title;
-    const link = mapLink(trip, { place: q });
+    const link = mapLink(trip, { place: q }, true);
     findBtn.href = link.url;
     findBtn.textContent = trip.region === '국내' ? '🗺 네이버' : '🗺 구글';
     findBtn.title = (trip.region === '국내' ? '네이버' : '구글') + ' 지도 사이트에서 찾아보기';
@@ -1952,7 +1979,17 @@ function renderBudget(trip) {
         ${e.currency !== 'KRW' ? `<small>≈ ${won(toKRW(trip, e))}</small>` : ''}</span>
     </div>`).join('') : '<div class="empty-state">아직 지출 기록이 없어요</div>';
 
-  return `
+  // 환율 계산기: 현지 금액 → 원화, 바로 지출로 (식당·가게에서 계산기 앱 없이)
+  const calc = cur === 'KRW' ? '' : `
+    <div class="card calc">
+      <div class="row"><b>💱 계산기</b><span class="spacer"></span><span class="muted small">${money(1, cur)} = ${rate.toLocaleString('ko-KR')}원</span></div>
+      <div class="calc-row">
+        <input id="calcIn" type="number" inputmode="decimal" step="any" min="0" placeholder="${cur} 금액" value="${calcValue}">
+        <span class="muted">≈</span><b id="calcOut" class="num">${won((Number(calcValue) || 0) * rate)}</b>
+      </div>
+      <button class="btn sm primary" data-act="calc-add">이 금액 지출에 추가</button>
+    </div>`;
+  return `${calc}
     <div class="card">
       <div class="stat-grid">
         <div class="stat"><div class="label">총 예산</div><div class="value">${won(planTotal)}</div></div>
@@ -2582,6 +2619,13 @@ $('#view').addEventListener('click', (ev) => {
     case 'edit-check': checkForm(ft, ft.checklist.find((x) => x.id === id)); break;
     case 'add-check': checkForm(ft, null); break;
     case 'edit-plan': planForm(ft); break;
+    case 'calc-add': {
+      if (!(Number(calcValue) > 0)) { toast('금액을 먼저 입력하세요'); break; }
+      expForm(ft, null);
+      $('#modalForm').amount.value = calcValue; // 통화는 기본이 여행 통화
+      calcValue = '';
+      break;
+    }
     case 'add-exp': expForm(ft, null); break;
     case 'edit-exp': expForm(ft, ft.expenses.find((x) => x.id === id)); break;
     case 'add-book': bookForm(ft, null); break;
@@ -2593,7 +2637,13 @@ $('#view').addEventListener('click', (ev) => {
   }
 });
 
+let calcValue = ''; // 계산기 입력 (화면을 다시 그려도 유지)
 $('#view').addEventListener('input', (ev) => {
+  if (ev.target.id === 'calcIn') {
+    calcValue = ev.target.value;
+    $('#calcOut').textContent = won((Number(calcValue) || 0) * focusTrip().budget.rate);
+    return;
+  }
   if (ev.target.id !== 'searchInput') return;
   searchQuery = ev.target.value;
   $('#tripList').innerHTML = tripListHtml(); // 목록만 다시 그려서 입력창 포커스를 유지
@@ -2666,7 +2716,11 @@ function moveItem(day, from, to) {
   const next = day.items[to + 1];
   const t = isHHMM(it.time) && hhmm(it.time);
   const off = t && ((prev && isHHMM(prev.time) && hhmm(prev.time) > t) || (next && isHHMM(next.time) && hhmm(next.time) < t));
-  if (off) askMovedTime(day, it, prev, next);
+  if (!off) return;
+  // 여러 개를 연달아 옮길 때 번거롭지 않게: 시간은 그대로 두고(겹치면 경고 표시), 원하면 알림의 버튼으로 맞춘다
+  const sug = suggestTime(it, prev, next);
+  if (sug) toast(`⏱ ${sug.time}로 맞출까요?`, { label: '맞추기', run: () => { it.time = sug.time; save(); render(); } });
+  else toast('시간 순서가 앞뒤 일정과 달라요');
 }
 // 제안 시간: 앞 일정 끝(+이동 시간) → 맨 앞으로 옮겼으면 다음 일정 시작 전. 5분 단위로 올림.
 function suggestTime(it, prev, next) {
@@ -2681,26 +2735,6 @@ function suggestTime(it, prev, next) {
     return n >= 0 ? { time: fromMin(n), why: '다음 일정 전' } : null;
   }
   return null;
-}
-function askMovedTime(day, it, prev, next) {
-  const sug = suggestTime(it, prev, next);
-  openModal({
-    title: '옮긴 일정의 시간',
-    html: `<p style="margin-top:0">“${esc(it.title)}”(${esc(it.time)})이 앞뒤 일정과 시간 순서가 맞지 않아요.</p>
-      <div class="col-btns">
-        ${sug ? `<button type="button" class="btn primary" data-t="${sug.time}">⏱ ${sug.time}로 맞추기 <span class="small">(${sug.why})</span></button>` : ''}
-        <button type="button" class="btn" data-t="">시간 미정으로</button>
-        <button type="button" class="btn ghost" data-t="keep">그대로 두기</button>
-      </div>`,
-  });
-  $('#modalCancel').style.display = 'none';
-  $('#modalBody').onclick = (ev) => {
-    const b = ev.target.closest('[data-t]');
-    if (!b) return;
-    if (b.dataset.t !== 'keep') { it.time = b.dataset.t; save(); render(); }
-    modal.close();
-  };
-  modal.addEventListener('close', () => { $('#modalCancel').style.display = ''; $('#modalBody').onclick = null; }, { once: true });
 }
 
 let touchStart = null;
