@@ -456,6 +456,19 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 .tl2.done .tl2-check { background: var(--ok); border-color: var(--ok); }
 .tl2.done .tl2-title { text-decoration: line-through; color: var(--muted); }
 .tl2.done .tl2-dot { filter: grayscale(1); opacity: .6; }
+/* 끌어서 순서 바꾸기: 동그라미가 손잡이 */
+.tl2-dot { touch-action: none; cursor: grab; }
+.drag-on { user-select: none; -webkit-user-select: none; }
+.drag-on .tl2-leg { opacity: .3; }
+.tl2.dragging { z-index: 5; opacity: .9; }
+.tl2.dragging .tl2-card { box-shadow: 0 8px 22px rgba(0, 0, 0, .22); }
+.tl2.dragging .tl2-dot { cursor: grabbing; transform: scale(1.12); }
+.tl2.drop-before::after, .tl2.drop-after::after {
+  content: ''; position: absolute; left: 44px; right: 0; height: 3px; border-radius: 3px; background: var(--accent);
+}
+.tl2.drop-before::after { top: -2px; }
+.tl2.drop-after::after { bottom: -2px; }
+.col-btns { display: grid; gap: 8px; }
 
 /* 밀어서 날짜 넘길 때 살짝 미끄러지는 효과 */
 /* 타임라인 카드는 세로 스크롤만 브라우저에 맡기고, 가로 밀기는 앱이 처리 */

@@ -1209,7 +1209,7 @@ function renderDays(trip) {
       <ul class="timeline2">${items}</ul>
     </div>
     <button class="add-btn" data-act="add-item">+ 장소 추가</button>
-    <p class="muted small" style="text-align:center;margin-top:14px">일정을 누르면 수정, 좌우로 밀면 다른 날로 넘어가요.${hasLeg ? '<br>“자동” 이동 시간은 직선거리 어림값이에요. 이동 줄을 눌러 수단·시간을 정할 수 있어요.' : ''}</p>`;
+    <p class="muted small" style="text-align:center;margin-top:14px">일정을 누르면 수정, 좌우로 밀면 다른 날로 넘어가요.<br>왼쪽 동그라미를 잡고 위아래로 끌면 순서가 바뀌어요.${hasLeg ? '<br>“자동” 이동 시간은 직선거리 어림값이에요. 이동 줄을 눌러 수단·시간을 정할 수 있어요.' : ''}</p>`;
 }
 
 /* ---------- 시간 겹침 ---------- */
@@ -1425,7 +1425,7 @@ function timelineItem(trip, it, i, clash) {
     + (links ? `<span class="tl2-links">${links}</span>` : '');
   return `
     <li class="tl2 ${it.done ? 'done' : ''}" style="--cat:${c.color}">
-      <span class="tl2-dot" title="${esc(it.cat)}">${c.icon}<span class="tl2-num">${i + 1}</span></span>
+      <span class="tl2-dot" title="${esc(it.cat)} · 끌어서 순서 바꾸기">${c.icon}<span class="tl2-num">${i + 1}</span></span>
       <div class="tl2-card" data-act="edit-item" data-id="${it.id}">
         <div class="tl2-top">
           <span class="tl2-time">${esc(when || it.cat)}</span>${clash ? '<span class="tl2-warn">⚠ 시간 겹침</span>' : ''}<span class="spacer"></span>
@@ -2339,9 +2339,104 @@ $('#view').addEventListener('change', (ev) => {
   render();
 });
 
+/* ---------- 일정 끌어서 순서 바꾸기: 왼쪽 동그라미를 잡고 위아래로 ---------- */
+let drag = null;
+const dragRows = () => [...document.querySelectorAll('#dayCard .tl2')];
+$('#view').addEventListener('pointerdown', (ev) => {
+  const dot = ev.target.closest('.tl2-dot');
+  if (!dot || !inDetail() || ev.button > 0) return;
+  const rows = dragRows();
+  if (rows.length < 2) return;
+  ev.preventDefault();
+  try { dot.setPointerCapture(ev.pointerId); } catch (e) { /* 이미 끝난 손가락 */ }
+  const li = dot.closest('.tl2');
+  drag = { li, rows, from: rows.indexOf(li), to: rows.indexOf(li), y0: ev.clientY + window.scrollY };
+  li.classList.add('dragging');
+  $('#dayCard').classList.add('drag-on');
+});
+$('#view').addEventListener('pointermove', (ev) => {
+  if (!drag) return;
+  const y = ev.clientY;
+  // 화면 위·아래 끝에 가까우면 천천히 스크롤
+  if (y < 90) window.scrollBy(0, -10);
+  else if (y > window.innerHeight - 110) window.scrollBy(0, 10);
+  drag.li.style.transform = `translateY(${y + window.scrollY - drag.y0}px)`;
+  const others = drag.rows.filter((r) => r !== drag.li);
+  const to = others.filter((r) => { const b = r.getBoundingClientRect(); return b.top + b.height / 2 < y; }).length;
+  drag.to = to;
+  others.forEach((r) => r.classList.remove('drop-before', 'drop-after'));
+  if (to === drag.from) return;
+  if (to < others.length) others[to].classList.add('drop-before');
+  else others[others.length - 1].classList.add('drop-after');
+});
+function endDrag() {
+  if (!drag) return;
+  const { li, rows, from, to } = drag;
+  drag = null;
+  li.style.transform = '';
+  li.classList.remove('dragging');
+  rows.forEach((r) => r.classList.remove('drop-before', 'drop-after'));
+  $('#dayCard')?.classList.remove('drag-on');
+  if (to !== from) moveItem(currentDay(), from, to);
+}
+$('#view').addEventListener('pointerup', endDrag);
+$('#view').addEventListener('pointercancel', endDrag);
+
+// 순서를 옮기고, 앞 일정이 바뀐 일정의 '이동 수단'은 지운다(어디서 오는지가 달라졌으므로).
+// 옮긴 일정의 시간이 앞뒤 순서와 어긋나면 시간을 어떻게 할지 묻는다.
+function moveItem(day, from, to) {
+  const prevOf = (list) => Object.fromEntries(list.map((x, i) => [x.id, i ? list[i - 1].id : null]));
+  const before = prevOf(day.items);
+  const [it] = day.items.splice(from, 1);
+  day.items.splice(to, 0, it);
+  const after = prevOf(day.items);
+  for (const x of day.items) if (x.move && before[x.id] !== after[x.id]) delete x.move;
+  save();
+  render();
+  const prev = day.items[to - 1];
+  const next = day.items[to + 1];
+  const t = isHHMM(it.time) && hhmm(it.time);
+  const off = t && ((prev && isHHMM(prev.time) && hhmm(prev.time) > t) || (next && isHHMM(next.time) && hhmm(next.time) < t));
+  if (off) askMovedTime(day, it, prev, next);
+}
+// 제안 시간: 앞 일정 끝(+이동 시간) → 맨 앞으로 옮겼으면 다음 일정 시작 전. 5분 단위로 올림.
+function suggestTime(it, prev, next) {
+  const r5 = (n) => Math.ceil(n / 5) * 5;
+  const legMin = (a, b) => { const l = travelLeg(a, b); return (l && l.min) || 0; };
+  if (prev && isHHMM(prev.time)) {
+    const n = r5(itemRange(prev).end + legMin(prev, it));
+    return n < 24 * 60 ? { time: fromMin(n), why: '앞 일정 끝 + 이동' } : null;
+  }
+  if (next && isHHMM(next.time)) {
+    const n = Math.floor((toMin(next.time) - (parseDurMin(it.dur) || DEFAULT_DUR_MIN) - legMin(it, next)) / 5) * 5;
+    return n >= 0 ? { time: fromMin(n), why: '다음 일정 전' } : null;
+  }
+  return null;
+}
+function askMovedTime(day, it, prev, next) {
+  const sug = suggestTime(it, prev, next);
+  openModal({
+    title: '옮긴 일정의 시간',
+    html: `<p style="margin-top:0">“${esc(it.title)}”(${esc(it.time)})이 앞뒤 일정과 시간 순서가 맞지 않아요.</p>
+      <div class="col-btns">
+        ${sug ? `<button type="button" class="btn primary" data-t="${sug.time}">⏱ ${sug.time}로 맞추기 <span class="small">(${sug.why})</span></button>` : ''}
+        <button type="button" class="btn" data-t="">시간 미정으로</button>
+        <button type="button" class="btn ghost" data-t="keep">그대로 두기</button>
+      </div>`,
+  });
+  $('#modalCancel').style.display = 'none';
+  $('#modalBody').onclick = (ev) => {
+    const b = ev.target.closest('[data-t]');
+    if (!b) return;
+    if (b.dataset.t !== 'keep') { it.time = b.dataset.t; save(); render(); }
+    modal.close();
+  };
+  modal.addEventListener('close', () => { $('#modalCancel').style.display = ''; $('#modalBody').onclick = null; }, { once: true });
+}
+
 let touchStart = null;
 $('#view').addEventListener('touchstart', (ev) => {
-  if (!inDetail() || !ev.target.closest('#dayCard')) return;
+  if (drag || !inDetail() || !ev.target.closest('#dayCard')) return; // 순서 끌기 중에는 날짜 넘기기 안 함
   const p = ev.touches[0];
   touchStart = { x: p.clientX, y: p.clientY };
 }, { passive: true });
