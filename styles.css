@@ -484,7 +484,7 @@ body.viewer-open { overflow: hidden; }
 .viewer-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top)); border-bottom: 1px solid #ddd; }
 .viewer-bar .btn { background: #fff; color: #111; border-color: #ccc; }
 .viewer-body { flex: 1; overflow: auto; padding: 12px; overscroll-behavior: contain; }
-.viewer-body img { display: block; width: 100%; height: auto; margin: 0 auto 16px; }
+.viewer-body img { display: block; width: 100%; height: auto; margin: 0 auto 16px; border: 1px solid #e5e5e5; }
 .viewer-body img.zoom { width: 200%; max-width: none; }
 .viewer-pdf { display: block; padding: 18px; margin-bottom: 16px; border: 1px solid #ccc; border-radius: 12px; color: #111; text-decoration: none; font-weight: 700; }
 .viewer-pdf span { display: block; font-weight: 400; font-size: 13px; color: #666; margin-top: 4px; }

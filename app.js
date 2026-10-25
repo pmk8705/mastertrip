@@ -1917,6 +1917,37 @@ async function voucherBlob(file) {
   if (!file.type.startsWith('image/')) return null;
   return shrinkImage(file, 2400, 0.92); // QR이 뭉개지지 않게 크고 선명하게
 }
+// PDF → 앞 3쪽을 사진으로 (PDF.js 4.10.38, Apache-2.0, vendor/pdfjs). 넣을 때만 불러온다(한 번 받으면 서비스 워커가 저장).
+// 안드로이드 크롬은 앱 안에서 PDF를 못 펼치므로, 현장에서는 이 사진을 바로 보여준다.
+const PDF_PAGES = 3;
+let pdfjsLoad;
+const loadPdfjs = () => pdfjsLoad || (pdfjsLoad = import('./vendor/pdfjs/pdf.min.mjs').then((m) => {
+  m.GlobalWorkerOptions.workerSrc = 'vendor/pdfjs/pdf.worker.min.mjs';
+  return m;
+}).catch((e) => { pdfjsLoad = null; throw e; }));
+async function pdfPages(file) {
+  const pdfjs = await loadPdfjs();
+  const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const pages = [];
+  try {
+    for (let n = 1; n <= Math.min(PDF_PAGES, doc.numPages); n++) {
+      const page = await doc.getPage(n);
+      const vp = page.getViewport({ scale: Math.min(3, 1600 / page.getViewport({ scale: 1 }).width) }); // 폭 1600px 정도: QR이 선명하게
+      const c = document.createElement('canvas');
+      c.width = Math.round(vp.width);
+      c.height = Math.round(vp.height);
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, c.width, c.height);
+      // intent 'print': 화면 새로고침(rAF)을 기다리지 않아 앱이 뒤로 가도 변환이 멈추지 않는다
+      await page.render({ canvasContext: ctx, viewport: vp, intent: 'print' }).promise;
+      pages.push(await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.92)));
+    }
+    return { pages, total: doc.numPages };
+  } finally {
+    doc.destroy();
+  }
+}
 async function deleteVouchers(list) {
   for (const v of list || []) await voucherDb.del(v.id).catch(() => {});
 }
@@ -1943,13 +1974,13 @@ async function openVoucher(b) {
   };
   try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* 지원 안 하면 그냥 */ }
   const parts = [];
-  for (const v of b.vouchers) {
+  for (const v of [...b.vouchers].sort((x, y) => isPdf(x) - isPdf(y))) { // 사진(변환된 쪽 포함) 먼저, PDF 원본은 맨 아래
     const blob = await voucherDb.get(v.id).catch(() => null);
     if (!blob) { parts.push(`<p class="viewer-note">${esc(v.name)}: 이 폰에 파일이 없어요</p>`); continue; }
     const url = URL.createObjectURL(blob);
     viewerUrls.push(url);
     parts.push(isPdf(v)
-      ? `<a class="viewer-pdf" href="${url}" download="${esc(v.name)}" target="_blank" rel="noopener">📄 ${esc(v.name)}<span>눌러서 PDF 앱으로 열기</span></a>`
+      ? `<a class="viewer-pdf" href="${url}" download="${esc(v.name)}" target="_blank" rel="noopener">📄 ${esc(v.name)}<span>전체 PDF 보기 · 눌러서 PDF 앱으로 열기</span></a>`
       : `<img src="${url}" alt="${esc(v.name)}">`);
   }
   if (el.isConnected) el.querySelector('.viewer-body').innerHTML = parts.join('') + '<p class="viewer-note">사진을 누르면 크게 · 화면 밝기를 올리면 QR이 잘 읽혀요</p>';
@@ -2033,11 +2064,11 @@ function bookForm(trip, b) {
     <div class="field"><span>바우처 · 티켓 (인터넷 없이 보기)</span>
       <div id="vList"></div>
       <label class="btn sm" style="margin-top:6px">+ 사진·PDF 추가<input type="file" id="vInput" accept="image/*,application/pdf" multiple hidden></label>
-      <div class="muted small" style="margin-top:4px">QR 화면은 스크린샷으로 넣는 게 가장 잘 보여요</div>
+      <div class="muted small" style="margin-top:4px">PDF는 앞 ${PDF_PAGES}쪽을 사진으로 바꿔 함께 저장해요. QR 화면 스크린샷도 좋아요</div>
     </div>`);
   const draw = () => {
     $('#vList').innerHTML = vList.map((v) => `
-      <div class="v-row"><span class="grow">${isPdf(v) ? '📄' : '🖼️'} ${esc(v.name)}</span>
+      <div class="v-row"><span class="grow">${v.from ? '↳ ' : ''}${isPdf(v) ? '📄' : '🖼️'} ${esc(v.name)}</span>
         <button type="button" class="btn sm ghost" data-v="${v.id}" aria-label="빼기">✕</button></div>`).join('')
       || '<div class="muted small">아직 없어요</div>';
     // PDF만 있으면 안내: 앱 밖(PDF 앱)에서 열려 현장에서 느리거나 안 열릴 수 있다. 저장은 막지 않는다.
@@ -2050,8 +2081,8 @@ function bookForm(trip, b) {
   $('#vList').onclick = (ev) => {
     const id = ev.target.closest('[data-v]')?.dataset.v;
     if (!id) return;
-    vList = vList.filter((v) => v.id !== id);
-    added.delete(id);
+    for (const v of vList) if (v.id === id || v.from === id) added.delete(v.id);
+    vList = vList.filter((v) => v.id !== id && v.from !== id); // PDF를 빼면 변환한 쪽도 함께
     draw();
   };
   $('#vInput').onchange = async (ev) => {
@@ -2061,10 +2092,32 @@ function bookForm(trip, b) {
       const v = { id: 'v-' + uid(), name: f.name, type: blob.type || f.type };
       added.set(v.id, blob);
       vList.push(v);
+      if (isPdf(v)) await addPdfPages(f, v);
     }
     ev.target.value = '';
     draw();
   };
+  // PDF 앞 3쪽을 사진으로 바꿔 함께 넣는다. 바꾸는 동안은 저장 버튼을 잠근다.
+  async function addPdfPages(f, v) {
+    draw();
+    $('#vList .notice')?.remove(); // 바꾸는 동안은 'PDF만 있음' 안내를 숨긴다
+    $('#vList').insertAdjacentHTML('beforeend', '<div class="muted small" style="padding:6px 0">📄 PDF를 사진으로 바꾸는 중…</div>');
+    $('#modalSave').disabled = true;
+    try {
+      const { pages, total } = await pdfPages(f);
+      pages.forEach((blob, i) => {
+        const pv = { id: 'v-' + uid(), name: `${f.name} (${i + 1}쪽)`, type: 'image/jpeg', from: v.id };
+        added.set(pv.id, blob);
+        vList.push(pv);
+      });
+      if (total > PDF_PAGES) toast(`앞 ${PDF_PAGES}쪽만 사진으로 바꿨어요 (전체 ${total}쪽은 PDF로 열기)`);
+    } catch (e) {
+      console.warn('PDF 변환 실패', e);
+      toast('PDF를 사진으로 바꾸지 못했어요. QR 화면 스크린샷을 넣어 주세요');
+    } finally {
+      $('#modalSave').disabled = false;
+    }
+  }
 }
 
 function contactForm(trip, c) {
