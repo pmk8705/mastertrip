@@ -162,8 +162,8 @@ function fmtRange(start, end) {
 
 const CURRENCIES = ['EUR', 'USD', 'JPY', 'GBP', 'CNY', 'TWD', 'HKD', 'VND', 'THB', 'PHP', 'SGD', 'AUD', 'CAD', 'CHF', 'KRW'];
 
-// 한국인이 많이 가는 나라 20곳 (Gemini 정리 2026-10-25). 여행지 칸의 나라·도시 이름으로 통화를 골라 준다.
-// 통화마다 환율은 fetchRate가 받는다 (VND·TWD·MOP·MNT는 Frankfurter에 없어 open.er-api.com)
+// 한국인이 많이 가는 나라 30곳 (Gemini 정리 2026-10-25). 여행지 칸의 나라·도시 이름으로 통화를 골라 준다.
+// 통화마다 환율은 fetchRate가 받는다 (VND·TWD·MOP·MNT·LAK·AED는 Frankfurter에 없어 open.er-api.com)
 const COUNTRIES = [
   { name: '일본', flag: '🇯🇵', cur: 'JPY', unit: '엔', sym: '¥', words: '도쿄 오사카 교토 후쿠오카 삿포로 홋카이도 오키나와 나고야 고베 요코하마 유후인 벳푸 가고시마 시즈오카 하코네' },
   { name: '베트남', flag: '🇻🇳', cur: 'VND', unit: '동', sym: '₫', words: '다낭 하노이 호치민 나트랑 냐짱 푸꾸옥 호이안 달랏 하롱 사파' },
@@ -185,12 +185,20 @@ const COUNTRIES = [
   { name: '체코', flag: '🇨🇿', cur: 'CZK', unit: '코루나', sym: 'Kč', words: '프라하 체스키크룸로프' },
   { name: '스위스', flag: '🇨🇭', cur: 'CHF', unit: '프랑', sym: 'CHF', words: '취리히 인터라켄 제네바 루체른 체르마트 융프라우' },
   { name: '몽골', flag: '🇲🇳', cur: 'MNT', unit: '투그릭', sym: '₮', words: '울란바토르 고비' },
+  { name: '독일', flag: '🇩🇪', cur: 'EUR', unit: '유로', sym: '€', words: '프랑크푸르트 뮌헨 베를린 하이델베르크 퓌센 로텐부르크 쾰른 함부르크' },
+  { name: '오스트리아', flag: '🇦🇹', cur: 'EUR', unit: '유로', sym: '€', words: '비엔나 잘츠부르크 할슈타트 인스브루크' }, // '빈'은 다른 낱말에 너무 많이 들어가서 뺌
+  { name: '캐나다', flag: '🇨🇦', cur: 'CAD', unit: '캐나다 달러', sym: 'C$', words: '밴쿠버 토론토 밴프 로키 퀘벡 몬트리올 옐로나이프' },
+  { name: '튀르키예', flag: '🇹🇷', cur: 'TRY', unit: '리라', sym: '₺', words: '터키 이스탄불 카파도키아 안탈리아 파묵칼레' },
+  { name: '뉴질랜드', flag: '🇳🇿', cur: 'NZD', unit: '뉴질랜드 달러', sym: 'NZ$', words: '오클랜드 퀸스타운 크라이스트처치' },
+  { name: '포르투갈', flag: '🇵🇹', cur: 'EUR', unit: '유로', sym: '€', words: '리스본 포르투 신트라' },
+  { name: '라오스', flag: '🇱🇦', cur: 'LAK', unit: '킵', sym: '₭', words: '비엔티안 방비엥 루앙프라방' },
+  { name: '헝가리', flag: '🇭🇺', cur: 'HUF', unit: '포린트', sym: 'Ft', words: '부다페스트' },
+  { name: '아랍에미리트', flag: '🇦🇪', cur: 'AED', unit: '디르함', sym: 'Dh', words: 'UAE 두바이 아부다비' }, // 아랍 글자 기호는 오른쪽→왼쪽이라 줄이 뒤섞여서 Dh
+  { name: '멕시코', flag: '🇲🇽', cur: 'MXN', unit: '페소', sym: 'Mex$', words: '칸쿤' },
 ];
-// 통화 고르기 목록: 같은 통화(유로)는 한 줄로
-const CUR_OPTIONS = [...new Set(COUNTRIES.map((c) => c.cur))].map((cur) => {
-  const cs = COUNTRIES.filter((c) => c.cur === cur);
-  return { v: cur, l: `${cs.map((c) => c.flag).join('')} ${cs.map((c) => c.name).join('·')} — ${cs[0].unit} (${cur} ${cs[0].sym})` };
-});
+// 통화 고르기 목록: 나라마다 한 줄 (유로 나라도 따로 — 나라 이름으로 찾기 쉽게). 값은 나라 이름, 저장은 통화
+const COUNTRY_OPTIONS = COUNTRIES.map((c) => ({ v: c.name, l: `${c.flag} ${c.name}, ${c.unit} (${c.cur}/${c.sym})` }));
+const curOf = (name) => (COUNTRIES.find((c) => c.name === name) || {}).cur || '';
 // 글에서 가장 먼저 나오는 나라·도시 (같은 자리면 긴 이름: '베니스'가 '니스'보다 먼저)
 function guessCountry(text) {
   let best = null;
@@ -835,9 +843,11 @@ function tripForm(trip) {
   const isNew = !trip;
   const t = trip || { emoji: '✈️', title: '', places: '', start: '', end: '', region: '해외', currency: 'EUR', budget: { rate: '', rateAuto: true }, people: 2 };
   const autoRate = t.budget.rateAuto && t.region !== '국내';
-  const known = CUR_OPTIONS.some((o) => o.v === t.currency);
-  const curPicked = known ? t.currency : t.currency === 'KRW' ? 'EUR' : ''; // 목록에 없으면 '직접 입력'
-  const otherCur = known || t.currency === 'KRW' ? '' : t.currency;
+  // 고른 나라: 여행지에서 찾은 나라(통화가 같을 때) → 그 통화의 첫 나라 → 목록에 없으면 '직접 입력'
+  const guess = guessCountry(t.places || '');
+  const first = COUNTRIES.find((c) => c.cur === t.currency);
+  const curPicked = guess && guess.cur === t.currency ? guess.name : first ? first.name : '';
+  const otherCur = first || t.currency === 'KRW' ? '' : t.currency;
   openModal({
     title: isNew ? '새 여행 만들기' : '여행 정보 수정',
     html: `<div class="field-row emoji-row">${fieldHtml({ name: 'emoji', label: '아이콘', value: t.emoji })}${fieldHtml({ name: 'title', label: '여행 이름', value: t.title, required: true, placeholder: '예: 제주도 힐링 여행' })}</div>`,
@@ -848,7 +858,7 @@ function tripForm(trip) {
       { name: 'people', label: '인원 (숙소·항공 찾기에 쓰여요)', type: 'number', value: t.people },
       { name: 'region', label: '지역', type: 'select', options: ['해외', '국내'], value: t.region },
       { name: 'currency', label: '현지 통화 (해외) — 여행지를 쓰면 자동으로 골라요', type: 'select', value: curPicked,
-        options: [...CUR_OPTIONS, { v: '', l: '✏️ 목록에 없는 통화 (직접 입력)' }] },
+        options: [...COUNTRY_OPTIONS, { v: '', l: '✏️ 목록에 없는 나라 (통화 직접 입력)' }] },
       { name: 'currencyOther', label: '통화 코드 (영문 3글자)', value: otherCur, list: CURRENCIES, placeholder: '예: CAD, NZD' },
       { name: 'rate', label: '환율: 현지 통화 1단위 = ?원 (비우면 자동)', type: 'number', value: autoRate || t.region === '국내' ? '' : t.budget.rate,
         placeholder: autoRate && t.budget.rate > 1 ? `자동 (지금 ${t.budget.rate}원)` : '자동' },
@@ -856,7 +866,7 @@ function tripForm(trip) {
     onSave: (d) => {
       if (!d.start || !d.end || d.end < d.start) { toast('날짜를 확인하세요 (도착일이 출발일보다 빠름)'); return false; }
       if (diffDays(d.end, d.start) > 120) { toast('여행 기간은 120일까지 가능해요'); return false; }
-      let currency = (d.currency || d.currencyOther || '').toUpperCase();
+      let currency = (curOf(d.currency) || d.currencyOther || '').toUpperCase();
       let rate = parseFloat(d.rate);
       let rateAuto = !d.rate; // 비우면 자동
       if (d.region === '국내' || currency === 'KRW') { currency = 'KRW'; rate = 1; rateAuto = true; }
@@ -923,14 +933,14 @@ function tripForm(trip) {
     box('currencyOther').style.display = dom || form.currency.value ? 'none' : '';
     box('rate').style.display = dom ? 'none' : '';
   };
-  const curChanged = () => { if (form.currency.value !== t.currency) form.rate.value = ''; sync(); }; // 다른 통화의 환율은 자동으로
+  const curChanged = () => { if (curOf(form.currency.value) !== t.currency) form.rate.value = ''; sync(); }; // 다른 통화의 환율은 자동으로
   let touched = false;
   form.currency.onchange = () => { touched = true; curChanged(); };
   form.region.onchange = sync;
   form.places.oninput = () => {
     const c = guessCountry(form.places.value);
-    if (!c || touched || form.currency.value === c.cur) return;
-    form.currency.value = c.cur;
+    if (!c || touched || form.currency.value === c.name) return;
+    form.currency.value = c.name;
     form.region.value = '해외';
     curChanged();
   };
