@@ -8,7 +8,8 @@ import http.server
 import os
 import sys
 
-PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+# PORT env (set by the preview launcher when the asked port is busy) wins over the argument
+PORT = int(os.environ.get('PORT') or (sys.argv[1] if len(sys.argv) > 1 else 8000))
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 
 

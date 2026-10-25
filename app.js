@@ -514,6 +514,7 @@ let modalHandlers = {};
 function openModal({ title, fields = [], html = '', onSave, onDelete, saveLabel = '저장', deleteConfirm = '삭제할까요?' }) {
   $('#modalTitle').textContent = title;
   $('#modalBody').innerHTML = html + fields.map(fieldHtml).join('');
+  $('#modalBody').onclick = null; // 여행 바꾸기 창이 단 클릭 처리를 다른 창에 남기지 않게
   $('#modalSave').style.display = onSave ? '' : 'none';
   $('#modalSave').textContent = saveLabel;
   $('#modalDelete').style.display = onDelete ? '' : 'none';
@@ -584,20 +585,19 @@ function sortTrips(list) {
 // 체크리스트·예산·예약 탭이 보여줄 여행: 사용자가 고른 여행, 없으면 자동(여행 중 → 가장 가까운 여행)
 function autoTrip() { return sortTrips(state.trips)[0] || null; }
 function focusTrip() { return getTrip(pickedTripId) || autoTrip(); }
-function detailTrip() { return getTrip(openTripId); }
+// '일정' 칸이 보여 주는 여행 (일정 수정 창·지도 등이 쓴다)
+function detailTrip() { return focusTrip(); }
 
 /* ============ 라우팅 ============ */
-// 하단 탭: 홈 | 내 여행 | 기록 | 설정. 내 여행 안의 상단 탭: 내 여행 | 체크리스트 | 예산 | 예약
+// 하단 탭: 홈 | 여행 | 기록 | 설정. 여행 안의 상단 탭: 일정 | 체크리스트 | 예산 | 예약 (네 칸 모두 focusTrip, 맨 위 tripSwitchRow로 바꾸기)
 const MAIN_TABS = ['home', 'trips', 'records', 'settings'];
-const SUB_TABS = ['trips', 'check', 'budget', 'book'];
+const SUB_TABS = ['plan', 'check', 'budget', 'book'];
 let mainTab = sessionStorage.getItem('main');
 if (!MAIN_TABS.includes(mainTab)) mainTab = 'trips';
 let subTab = sessionStorage.getItem('sub');
-if (!SUB_TABS.includes(subTab)) subTab = 'trips';
+if (!SUB_TABS.includes(subTab)) subTab = 'plan';
 let pickedTripId = sessionStorage.getItem('trip') || null;
-let openTripId = (history.state && history.state.trip) || null; // 여행 상세 화면에 들어가 있으면 그 여행 id
-let tripFilter = { now: true, soon: true, past: false };
-let searchOpen = false;
+let tripFilter = { now: true, soon: true, past: false }; // 여행 바꾸기 창의 칩
 let searchQuery = '';
 let selectedDate = null;
 let checkFilter = 'all';
@@ -623,47 +623,38 @@ function pickTrip(id) {
   remember('trip', id);
 }
 
-// 상세 화면은 브라우저 기록에 남겨서 안드로이드 뒤로가기 버튼으로 목록에 돌아오게 한다
+// 여행 카드를 누르면 그 여행의 '일정' 칸으로
 function openTrip(id) {
   pickTrip(id);
   selectedDate = null;
-  openTripId = id;
-  history.pushState({ trip: id }, '');
+  subTab = 'plan';
+  remember('sub', subTab);
   setMain('trips');
 }
-function closeTrip() {
-  if (history.state && history.state.trip) history.back();
-  else { openTripId = null; render(); }
-}
-window.addEventListener('popstate', (e) => {
+window.addEventListener('popstate', () => {
   closeViewer();
-  openTripId = (e.state && e.state.trip) || null;
-  selectedDate = null;
   render();
 });
 
 document.querySelectorAll('.tabbar button').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    if (btn.dataset.main === 'trips' && mainTab === 'trips' && openTripId) return closeTrip();
-    setMain(btn.dataset.main);
-  });
+  btn.addEventListener('click', () => setMain(btn.dataset.main));
 });
 document.querySelectorAll('.top-tabs button').forEach((btn) => {
   btn.addEventListener('click', () => setSub(btn.dataset.sub));
 });
 
-const inDetail = () => mainTab === 'trips' && !!detailTrip();
+const inDetail = () => mainTab === 'trips' && subTab === 'plan' && !!focusTrip();
 
 function render() {
-  if (openTripId && !detailTrip()) openTripId = null;
   const detail = inDetail();
-  const showHero = !detail && (mainTab === 'home' || mainTab === 'trips');
+  const showHero = mainTab === 'home' || mainTab === 'trips';
   $('#hero').hidden = !showHero;
-  $('#topTabs').hidden = !(mainTab === 'trips' && !detail);
+  $('#hero').classList.toggle('slim', mainTab === 'trips'); // 여행 탭에서는 배너를 얇게 (일정 자리를 넓게)
+  $('#topTabs').hidden = mainTab !== 'trips';
   $('#topbar').hidden = showHero;
   document.querySelectorAll('.tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.main === mainTab));
   document.querySelectorAll('.top-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.sub === subTab));
-  renderTopbar(detail);
+  renderTopbar();
 
   if (leafletMap) { leafletMap.remove(); leafletMap = null; }
   const view = $('#view');
@@ -672,12 +663,10 @@ function render() {
   if (mainTab === 'home') view.innerHTML = renderToday();
   else if (mainTab === 'records') view.innerHTML = renderRecords();
   else if (mainTab === 'settings') view.innerHTML = renderSettings();
-  else if (detail) view.innerHTML = renderDays(detailTrip());
-  else if (subTab === 'trips') view.innerHTML = renderTripsList();
   else {
     const t = focusTrip();
     if (!t) view.innerHTML = renderNoTrip();
-    else view.innerHTML = tripSwitchRow(t) + (subTab === 'check' ? renderCheck(t) : subTab === 'budget' ? renderBudget(t) : renderBook(t));
+    else view.innerHTML = tripSwitchRow(t) + (subTab === 'plan' ? renderDays(t) : subTab === 'check' ? renderCheck(t) : subTab === 'budget' ? renderBudget(t) : renderBook(t));
   }
   if (mainTab === 'records' && focusTrip()) mountFootprint(focusTrip());
   if (detail) {
@@ -711,18 +700,12 @@ function tripSub(t) {
   return `${fmtRange(t.start, t.end)} · 지난 여행`;
 }
 
-function renderTopbar(detail) {
-  $('#backBtn').hidden = !detail;
-  $('#tripEditBtn').hidden = !detail;
+function renderTopbar() {
   const h1 = $('#tripTitle');
   const sub = $('#tripSub');
-  document.title = 'MasterTrip Planner';
-  if (detail) {
-    const t = detailTrip();
-    h1.textContent = `${t.emoji} ${t.title}`;
-    sub.textContent = tripSub(t);
-    document.title = `${t.title} · MasterTrip`;
-  } else if (mainTab === 'records') {
+  const t = mainTab === 'trips' && focusTrip();
+  document.title = t ? `${t.title} · MasterTrip` : 'MasterTrip Planner';
+  if (mainTab === 'records') {
     h1.textContent = '기록';
     sub.textContent = '여행의 순간을 남기는 곳';
   } else if (mainTab === 'settings') {
@@ -731,17 +714,19 @@ function renderTopbar(detail) {
   }
 }
 
-// 체크리스트·예산·예약 화면 맨 위: 지금 보고 있는 여행 + 바꾸기
+// 여행 탭 네 칸·기록 맨 위: 지금 보고 있는 여행 (누르면 여행 바꾸기 창) + ✎ 여행 정보 수정
 function tripSwitchRow(t) {
-  return `<button class="trip-switch-row" data-act="switch-trip">
-    <span class="emo">${esc(t.emoji)}</span>
-    <span class="grow"><b>${esc(t.title)}</b> <span class="caret">▾</span><br><span class="muted small">${tripSub(t)}</span></span>
-    ${tripBadge(t)}
-  </button>`;
+  return `<div class="trip-switch-row">
+    <button type="button" class="tsr-main" data-act="switch-trip">
+      <span class="emo">${esc(t.emoji)}</span>
+      <span class="grow"><b>${esc(t.title)}</b> <span class="caret">▾</span><br><span class="muted small">${tripSub(t)}</span></span>
+      ${tripBadge(t)}
+    </button>
+    <button type="button" class="icon-btn" data-act="edit-trip" aria-label="여행 정보 수정">✎</button>
+  </div>`;
 }
 
-/* ============ 내 여행 목록 · 홈 ============ */
-const PHASE_LABEL = { now: '현재 여행', soon: '다가오는 여행', past: '지난 여행' };
+/* ============ 여행 카드 · 홈 ============ */
 // 사진이 없는 여행 카드의 노을빛 배경 (여행마다 하나씩 고정)
 const COVER_GRADIENTS = [
   'linear-gradient(135deg, #2b3a67 0%, #b5475a 55%, #f2a65a 100%)',
@@ -794,35 +779,6 @@ function tripCard(t) {
       <span class="tc-date">${fmtRange(t.start, t.end)}</span>
       ${route ? `<span class="tc-route">${route}</span>` : ''}
     </button>`;
-}
-
-function tripListHtml() {
-  const q = searchQuery.trim().toLowerCase();
-  // 검색 중에는 지난 여행까지 모두 찾는다
-  const list = sortTrips(state.trips.filter((t) => (q
-    ? `${t.title} ${t.places}`.toLowerCase().includes(q)
-    : tripFilter[phaseOf(t)])));
-  if (list.length) return list.map(tripCard).join('');
-  if (!state.trips.length) return '<div class="empty-state">아직 여행이 없어요.<br>위 버튼으로 첫 여행을 만들어 보세요.</div>';
-  return `<div class="empty-state">${q ? '검색 결과가 없어요' : '이 조건에 맞는 여행이 없어요'}</div>`;
-}
-
-function renderTripsList() {
-  const counts = { now: 0, soon: 0, past: 0 };
-  state.trips.forEach((t) => counts[phaseOf(t)]++);
-  const chips = Object.keys(PHASE_LABEL).map((p) => `
-    <button class="chip-f ${tripFilter[p] ? 'active' : ''}" data-act="trip-filter" data-v="${p}">${tripFilter[p] ? '<i class="dot"></i>' : ''}${PHASE_LABEL[p]} (${counts[p]})</button>`).join('');
-  const search = searchOpen ? `
-    <div class="search-box">
-      <input id="searchInput" type="search" placeholder="여행 이름·도시 검색" value="${esc(searchQuery)}" autocomplete="off">
-      <button class="more-btn" data-act="search-close" aria-label="검색 닫기">✕</button>
-    </div>` : '';
-  return `
-    ${search}
-    <div class="chips-row">${chips}</div>
-    <button class="cta" data-act="new-trip">+ 새로운 여행 일정 만들기</button>
-    <button type="button" class="add-btn import-trip" data-act="import-file">📥 받은 여행 열기 (카톡으로 받은 파일)</button>
-    <div class="trip-list" id="tripList">${tripListHtml()}</div>`;
 }
 
 function renderNoTrip() {
@@ -1275,7 +1231,6 @@ function tripForm(trip) {
       deleteVouchers(trip.bookings.flatMap((x) => x.vouchers || []));
       deletePhotos(trip.days.flatMap((d) => d.photos || []));
       if (pickedTripId === trip.id) pickTrip(null);
-      if (openTripId === trip.id) closeTrip();
     },
     deleteConfirm: `'${t.title}' 여행과 그 안의 일정·체크리스트·지출·예약이 모두 지워집니다. 삭제할까요?`,
   });
@@ -1300,7 +1255,7 @@ function tripForm(trip) {
           <button type="button" class="btn" id="saveTripBtn">⬇ 파일로 저장</button>
         </div>
         <div class="muted small" style="margin-top:4px">일정·예약·바우처가 파일 하나로 가요. 공유로 파일이 안 가면 '파일로 저장' 후 카톡에서 + → 파일로 보내 주세요.
-          받는 사람은 내 여행 → '📥 받은 여행 열기'로 열면 이 여행만 추가돼요(이미 있으면 새 내용으로 바뀜).</div>
+          받는 사람은 여행 탭 ▾(여행 바꾸기) → '📥 받은 여행 열기'로 열면 이 여행만 추가돼요(이미 있으면 새 내용으로 바뀜).</div>
       </div>`);
     $('#shareTripBtn').onclick = () => shareTrip(trip);
     $('#saveTripBtn').onclick = () => shareTrip(trip, true);
@@ -1348,19 +1303,58 @@ function buildDays(start, end, oldDays) {
   return out;
 }
 
-function tripPicker() {
-  const cur = pickedTripId;
-  const rows = sortTrips(state.trips).map((t) => `
-    <button type="button" class="pick-row ${t.id === cur ? 'on' : ''}" data-pick="${t.id}">
-      <span>${esc(t.emoji)}</span><span class="grow"><b>${esc(t.title)}</b><br><span class="muted small">${fmtRange(t.start, t.end)}</span></span>${tripBadge(t)}
-    </button>`).join('');
+const PICK_LABEL = { now: '여행 중', soon: '다가오는', past: '지난 여행' };
+// 여행 바꾸기 창: 검색 + 상태 칩 + 새 여행·받은 여행 열기 + 여행 목록 (자동 선택 포함)
+function tripPicker({ search = false } = {}) {
+  searchQuery = '';
+  const rows = () => {
+    const cur = pickedTripId;
+    const q = searchQuery.trim().toLowerCase();
+    // 검색 중에는 지난 여행까지 모두 찾는다
+    const list = sortTrips(state.trips.filter((t) => (q ? `${t.title} ${t.places}`.toLowerCase().includes(q) : tripFilter[phaseOf(t)])));
+    const auto = q ? '' : `<button type="button" class="pick-row ${!cur ? 'on' : ''}" data-pick=""><span>✨</span><span class="grow"><b>자동 선택</b><br><span class="muted small">여행 중이거나 가장 가까운 여행</span></span></button>`;
+    const html = list.map((t) => `
+      <button type="button" class="pick-row ${t.id === cur ? 'on' : ''}" data-pick="${t.id}">
+        <span class="pick-cover" style="${coverStyle(t)}">${esc(t.emoji)}</span>
+        <span class="grow"><b>${esc(t.title)}</b><br><span class="muted small">${fmtRange(t.start, t.end)}${t.places ? ' · ' + esc(t.places) : ''}</span></span>${tripBadge(t)}
+      </button>`).join('');
+    return auto + (html || `<div class="empty-state">${q ? '검색 결과가 없어요' : state.trips.length ? '이 조건에 맞는 여행이 없어요' : '아직 여행이 없어요'}</div>`);
+  };
+  const chips = () => {
+    const counts = { now: 0, soon: 0, past: 0 };
+    state.trips.forEach((t) => counts[phaseOf(t)]++);
+    return Object.keys(PICK_LABEL).map((p) => `
+      <button type="button" class="chip-f ${tripFilter[p] ? 'active' : ''}" data-filter="${p}">${tripFilter[p] ? '<i class="dot"></i>' : ''}${PICK_LABEL[p]} (${counts[p]})</button>`).join('');
+  };
   openModal({
     title: '어느 여행을 볼까요?',
-    html: `<button type="button" class="pick-row ${!cur ? 'on' : ''}" data-pick=""><span>✨</span><span class="grow"><b>자동 선택</b><br><span class="muted small">여행 중이거나 가장 가까운 여행</span></span></button>${rows}`,
+    html: `
+      <div class="search-box"><input id="searchInput" type="search" placeholder="여행 이름·도시 검색" value="${esc(searchQuery)}" autocomplete="off"></div>
+      <div class="chips-row" id="pickChips">${chips()}</div>
+      <div class="pick-new">
+        <button type="button" class="btn primary" data-pick-act="new">+ 새 여행</button>
+        <button type="button" class="btn" data-pick-act="import">📥 받은 여행 열기</button>
+      </div>
+      <div id="pickList">${rows()}</div>`,
   });
-  document.querySelectorAll('#modalBody [data-pick]').forEach((b) => {
-    b.onclick = () => { pickTrip(b.dataset.pick || null); modal.close(); render(); };
-  });
+  const body = $('#modalBody');
+  const done = (fn) => { modal.close(); fn(); };
+  body.onclick = (ev) => {
+    const f = ev.target.closest('[data-filter]');
+    if (f) {
+      tripFilter[f.dataset.filter] = !tripFilter[f.dataset.filter];
+      $('#pickChips').innerHTML = chips();
+      $('#pickList').innerHTML = rows();
+      return;
+    }
+    const act = ev.target.closest('[data-pick-act]');
+    if (act) return done(() => (act.dataset.pickAct === 'new' ? tripForm(null) : importPicker.click()));
+    const b = ev.target.closest('[data-pick]');
+    if (b) done(() => { pickTrip(b.dataset.pick || null); selectedDate = null; render(); window.scrollTo(0, 0); });
+  };
+  const input = $('#searchInput');
+  input.oninput = () => { searchQuery = input.value; $('#pickList').innerHTML = rows(); };
+  if (search) input.focus();
 }
 
 /* ============ 지도 · 장소 검색 ============ */
@@ -2771,7 +2765,7 @@ function renderSettings() {
 
 function resetAll() {
   if (!confirm('모든 여행과 수정 내용이 지워지고 처음 상태(스페인 여행 초안)로 돌아갑니다. 계속할까요?')) return;
-  state = migrate(seedData()); pickTrip(null); openTripId = null; save(); render(); toast('초기화했어요'); // migrate: 분류 등 기본값 채우기
+  state = migrate(seedData()); pickTrip(null); save(); render(); toast('초기화했어요'); // migrate: 분류 등 기본값 채우기
   clearCovers().then(render);
   voucherDb.clear().catch(() => {});
   photoDb.clear().catch(() => {});
@@ -2810,7 +2804,7 @@ async function exportData() {
 const TRIP_FILE = 'mastertrip-trip';
 const PDF_MARK = '%MASTERTRIP-DATA:';
 function tripPdf(b64) {
-  const text = [['MasterTrip trip file', 20, 780], ['Open this file in the MasterTrip app:', 12, 748], ['My Trips > Open received trip  (or Settings > Import)', 12, 728]]
+  const text = [['MasterTrip trip file', 20, 780], ['Open this file in the MasterTrip app:', 12, 748], ['Trips tab > trip switcher > Open received trip  (or Settings > Import)', 12, 728]]
     .map(([t, size, y]) => `BT /F1 ${size} Tf 50 ${y} Td (${t.replace(/[()\\]/g, '\\$&')}) Tj ET`).join('\n');
   const objs = [
     '<< /Type /Catalog /Pages 2 0 R >>',
@@ -2983,7 +2977,7 @@ function importData(ev) {
       delete data.vouchers;
       delete data.photos;
       if (data.vault) data.vault.lock = ''; // 패스키는 원래 폰에만 있어서 다른 폰에선 못 연다 → 잠금은 끈 채로
-      state = migrate(data); pickTrip(null); openTripId = null; save(); render(); toast('가져오기 완료');
+      state = migrate(data); pickTrip(null); save(); render(); toast('가져오기 완료');
       clearCovers()
         .then(() => Promise.all(Object.entries(covers).map(([id, url]) => fetch(url).then((r) => r.blob()).then((b) => setCover(id, b)))))
         .then(render);
@@ -3005,15 +2999,7 @@ function importData(ev) {
 }
 
 /* ============ 이벤트 위임 ============ */
-$('#backBtn').addEventListener('click', closeTrip);
-$('#tripEditBtn').addEventListener('click', () => { const t = detailTrip(); if (t) tripForm(t); });
-$('#searchBtn').addEventListener('click', () => {
-  searchOpen = true;
-  mainTab = 'trips'; remember('main', mainTab);
-  setSub('trips');
-  const input = $('#searchInput');
-  if (input) input.focus();
-});
+$('#searchBtn').addEventListener('click', () => tripPicker({ search: true }));
 
 $('#view').addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-act]');
@@ -3034,7 +3020,7 @@ $('#view').addEventListener('click', (ev) => {
     }
     case 'toggle-map': mapOpen = !mapOpen; remember('map', mapOpen ? '1' : '0'); render(); break;
     case 'geocode-all': geocodeAll(detailTrip()); break;
-    case 'search-close': searchOpen = false; searchQuery = ''; render(); break;
+    case 'edit-trip': tripForm(ft); break;
     case 'goto-sub': pickTrip(id); mainTab = 'trips'; remember('main', mainTab); setSub(el.dataset.v); window.scrollTo(0, 0); break;
     case 'export': withVault(exportData); break; // 백업에 비상 서류가 들어가니 잠금이 켜져 있으면 확인 후
     case 'import-file': importPicker.click(); break;
@@ -3047,7 +3033,6 @@ $('#view').addEventListener('click', (ev) => {
     case 'theme': setTheme(el.dataset.v); break;
     case 'reset': resetAll(); break;
     case 'open-trip': openTrip(id); break;
-    case 'trip-filter': tripFilter[el.dataset.v] = !tripFilter[el.dataset.v]; render(); break;
     case 'pick-day': selectedDate = el.dataset.date; render(); break;
     case 'toggle-item': { const it = day.items.find((x) => x.id === id); it.done = !it.done; save(); render(); break; }
     case 'edit-item': itemForm(day.items.find((x) => x.id === id)); break;
@@ -3091,11 +3076,7 @@ $('#view').addEventListener('input', (ev) => {
   if (ev.target.id === 'calcIn') {
     calcValue = ev.target.value;
     $('#calcOut').textContent = won((Number(calcValue) || 0) * focusTrip().budget.rate);
-    return;
   }
-  if (ev.target.id !== 'searchInput') return;
-  searchQuery = ev.target.value;
-  $('#tripList').innerHTML = tripListHtml(); // 목록만 다시 그려서 입력창 포커스를 유지
 });
 
 $('#view').addEventListener('change', (ev) => {

@@ -316,7 +316,6 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 .topbar[hidden] { display: none; }
 .top-main { flex: 1; min-width: 0; }
 .topbar h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.back-btn { font-size: 26px; line-height: 1; padding-bottom: 4px; flex: 0 0 auto; }
 .topbar .icon-btn { flex: 0 0 auto; }
 
 /* 홈·내 여행 상단: 로고가 그려진 노을 배너 (img/header.jpg, tools/make-header.ps1로 생성).
@@ -327,6 +326,11 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 }
 .hero::before { content: ''; display: block; aspect-ratio: 1200 / 396; }
 .hero[hidden] { display: none; }
+/* 여행 탭: 얇은 띠 (그림 맨 위 노을 하늘만 — 글자가 반쯤 잘려 보이지 않게) */
+.hero.slim { background-position: center top; }
+.hero.slim::before { aspect-ratio: auto; height: 44px; }
+.hero.slim .hero-btn { top: calc(env(safe-area-inset-top) + 3px); width: 34px; height: 34px; }
+.hero.slim + .top-tabs { margin-top: -10px; border-radius: 14px 14px 0 0; }
 .hero-btn {
   position: absolute; top: calc(env(safe-area-inset-top) + 6px); right: 6px;
   border: 0; background: rgba(10, 14, 30, .28); color: #fff; width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
@@ -399,9 +403,14 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 
 /* 체크리스트·예산·예약 맨 위: 지금 보고 있는 여행 */
 .trip-switch-row {
-  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; cursor: pointer;
-  border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 12px;
+  display: flex; align-items: center; gap: 4px;
+  border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 0 6px 0 0; margin-bottom: 12px;
 }
+.tsr-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; text-align: left; cursor: pointer;
+  border: 0; background: none; color: inherit; font: inherit; padding: 10px 6px 10px 14px;
+}
+.trip-switch-row .icon-btn { flex: 0 0 auto; }
 .trip-switch-row .emo { font-size: 24px; }
 .trip-switch-row .grow { flex: 1; min-width: 0; }
 .trip-switch-row .caret { color: var(--accent-ink); font-size: 13px; }
@@ -423,6 +432,12 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 .pick-row > span:first-child { font-size: 22px; }
 .pick-row .grow { flex: 1; min-width: 0; }
 .pick-row.on { border-color: var(--accent); background: var(--accent-soft); }
+.pick-row > .pick-cover {
+  flex: 0 0 auto; width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center; font-size: 20px;
+  background: var(--cover); background-size: cover; background-position: center;
+}
+.pick-new { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+#modalBody .chips-row { margin-left: 0; margin-right: 0; padding: 0; }
 
 /* 여행 만들기 폼: 아이콘 칸은 좁게 */
 .emoji-row { grid-template-columns: 72px 1fr; }
