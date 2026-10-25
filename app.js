@@ -2490,16 +2490,61 @@ async function shareTrip(trip, asFile) {
 }
 const restoreBlob = (url) => fetch(url).then((r) => r.blob());
 // 받은 여행 하나: 처음 받는 여행이면 추가, 이미 있는 여행(같은 id)이면 받은 내용으로 교체
+// 이미 있는 여행을 받으면: 일정·예약만 업데이트(기본) / 전체 바꾸기 / 닫기(취소)
+function askImportMode(old, when) {
+  return new Promise((res) => {
+    let picked = null;
+    openModal({
+      title: '받은 여행',
+      html: `<p style="margin-top:0">이미 있는 “${esc(old.title)}” 여행이에요${when}. 어떻게 할까요?</p>
+        <div class="col-btns">
+          <button type="button" class="btn primary" data-m="plan">일정·예약만 업데이트<br><span class="small">내 지출·한 줄 평·사진·완료 체크는 그대로</span></button>
+          <button type="button" class="btn" data-m="all">전체 바꾸기<br><span class="small">지출·한 줄 평도 받은 내용으로 (사진은 그대로)</span></button>
+        </div>`,
+    });
+    // 고르는 즉시 끝낸다 ('close' 이벤트는 화면이 가려져 있으면 늦거나 안 올 수 있어 닫기·뒤로가기 때만 보조로)
+    const finish = (m) => {
+      if (picked !== null) return;
+      picked = m || '';
+      $('#modalBody').onclick = null;
+      $('#modalCancel').removeEventListener('click', onCancel);
+      modal.removeEventListener('close', onCancel);
+      if (modal.open) modal.close();
+      res(m || null);
+    };
+    const onCancel = () => finish(null);
+    $('#modalBody').onclick = (ev) => {
+      const b = ev.target.closest('[data-m]');
+      if (b) finish(b.dataset.m);
+    };
+    $('#modalCancel').addEventListener('click', onCancel);
+    modal.addEventListener('close', onCancel);
+  });
+}
+// 일정·예약만: 받은 여행(t)에 내 기록을 옮겨 담는다 — 지출·예산, 한 줄 평(내 것이 있으면), 일정·체크리스트 완료 표시
+function keepMyRecords(old, t) {
+  const doneItem = new Map(old.days.flatMap((d) => d.items).map((x) => [x.id, x.done]));
+  const doneCheck = new Map(old.checklist.map((c) => [c.id, c.done]));
+  for (const d of t.days) {
+    const od = old.days.find((x) => x.date === d.date);
+    if (od && od.note) d.note = od.note;
+    for (const it of d.items) if (doneItem.has(it.id)) it.done = doneItem.get(it.id);
+  }
+  for (const c of t.checklist) if (doneCheck.has(c.id)) c.done = doneCheck.get(c.id);
+  t.expenses = old.expenses;
+  t.budget = old.budget;
+}
 async function importTrip(data) {
   const t = migrate({ trips: [data.trip] }).trips[0];
   const old = getTrip(t.id);
   const when = data.sentAt ? ` (${fmtDate(ymd(new Date(data.sentAt)))} 보냄)` : '';
-  const msg = old
-    ? `이미 있는 '${old.title}' 여행을 받은 파일${when} 내용으로 바꿀까요?
-이 폰에서만 고친 내용은 사라져요.`
-    : `'${t.title}' 여행을 추가할까요?${when}`;
-  if (!confirm(msg)) return;
+  let mode = 'add';
   if (old) {
+    mode = await askImportMode(old, when);
+    if (!mode) return;
+  } else if (!confirm(`“${t.title}” 여행을 추가할까요?${when}`)) return;
+  if (old) {
+    if (mode === 'plan') keepMyRecords(old, t);
     // 새 파일에 없는 옛 바우처만, 다 지운 뒤에 새 것을 넣는다 (동시에 하면 새로 넣은 게 지워질 수 있음)
     const keep = new Set(Object.keys(data.vouchers || {}));
     await deleteVouchers(old.bookings.flatMap((b) => b.vouchers || []).filter((v) => !keep.has(v.id)));
@@ -2519,7 +2564,7 @@ async function importTrip(data) {
   mainTab = 'trips';
   remember('main', mainTab);
   openTrip(t.id);
-  toast(old ? '받은 내용으로 바꿨어요' : '여행을 추가했어요');
+  toast(mode === 'plan' ? '일정·예약을 업데이트했어요 (내 기록은 그대로)' : old ? '받은 내용으로 바꿨어요' : '여행을 추가했어요');
 }
 
 // 파일 고르기 칸은 화면(#view) 밖에 하나만 둔다: 고르는 동안 앱이 뒤로 갔다 오면 visibilitychange로 화면을
