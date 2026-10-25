@@ -700,7 +700,7 @@ function renderTopbar(detail) {
     sub.textContent = '여행의 순간을 남기는 곳';
   } else if (mainTab === 'settings') {
     h1.textContent = '설정';
-    sub.textContent = '백업 · 데이터 관리';
+    sub.textContent = '화면 · 백업 · 데이터 관리';
   }
 }
 
@@ -2166,8 +2166,26 @@ function contactForm(trip, c) {
 }
 
 /* ============ 설정 · 백업 ============ */
+// 화면 모드: 자동(폰 설정) / 밝게 / 어둡게. 이 폰에만 저장 (index.html 머리에서 그리기 전에 먼저 적용)
+const THEME_KEY = 'mastertrip-theme';
+const THEMES = { auto: '📱 자동', light: '☀️ 밝게', dark: '🌙 어둡게' };
+function getTheme() { try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) { return 'auto'; } }
+function setTheme(v) {
+  try { if (v === 'auto') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, v); } catch (e) {}
+  if (v === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = v;
+  render();
+}
+
 function renderSettings() {
+  const theme = getTheme();
   return `
+    <div class="section-title"><h3>화면</h3></div>
+    <div class="card">
+      <p class="small muted" style="margin-top:0">화면 모드 — 자동은 폰의 다크 모드 설정을 따라가요.</p>
+      <div class="seg-btns">${Object.entries(THEMES).map(([k, l]) =>
+        `<button type="button" class="btn sm${k === theme ? ' primary' : ''}" data-act="theme" data-v="${k}">${l}</button>`).join('')}</div>
+    </div>
     <div class="section-title"><h3>백업</h3></div>
     <div class="card">
       <p class="small muted" style="margin-top:0">데이터는 이 폰 안에만 저장돼요. 폰을 바꾸거나 브라우저 데이터를 지우면 사라지니 가끔 내보내기로 백업하세요. 백업에는 모든 여행이 들어갑니다.</p>
@@ -2275,6 +2293,7 @@ $('#view').addEventListener('click', (ev) => {
     case 'search-close': searchOpen = false; searchQuery = ''; render(); break;
     case 'goto-sub': pickTrip(id); mainTab = 'trips'; remember('main', mainTab); setSub(el.dataset.v); window.scrollTo(0, 0); break;
     case 'export': exportData(); break;
+    case 'theme': setTheme(el.dataset.v); break;
     case 'reset': resetAll(); break;
     case 'open-trip': openTrip(id); break;
     case 'trip-filter': tripFilter[el.dataset.v] = !tripFilter[el.dataset.v]; render(); break;

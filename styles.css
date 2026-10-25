@@ -25,8 +25,9 @@
   --seg4: #F8DDE4; --seg4-ink: #7A2E44;
   --seg5: #D5F0EE; --seg5-ink: #1F5E59;
 }
+/* 다크: 폰 설정을 따르되(자동) 앱 설정에서 밝게/어둡게 고정 가능 (html data-theme) */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #1a1511;
     --surface: #251e18;
     --surface-2: #2f2620;
@@ -51,6 +52,33 @@
     --seg5: #173a37; --seg5-ink: #9fe0d9;
   }
 }
+:root[data-theme="dark"] {
+  --bg: #1a1511;
+  --surface: #251e18;
+  --surface-2: #2f2620;
+  --text: #f3ece4;
+  --muted: #b3a291;
+  --line: #3d3229;
+  --accent: #FF8A1F;
+  --accent-ink: #FFA14D;
+  --on-accent: #1A0D00;
+  --accent-soft: #3d2416;
+  --ok-soft: #14361f;
+  --ok-ink: #86efac;
+  --gold: #e0a64a;
+  --ok: #4ade80;
+  --danger: #f87171;
+  --shadow: none;
+  --seg0: #1d3247; --seg0-ink: #a9cdf2;
+  --seg1: #1f3824; --seg1-ink: #a6dcae;
+  --seg2: #2f2745; --seg2-ink: #cbbdf0;
+  --seg3: #3a301a; --seg3-ink: #ecd49a;
+  --seg4: #40222b; --seg4-ink: #f0b3c3;
+  --seg5: #173a37; --seg5-ink: #9fe0d9;
+}
+:root { color-scheme: light dark; }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -616,3 +644,7 @@ body.viewer-open { overflow: hidden; }
 .leg-warn { display: inline-block; margin: 3px 0 0 4px; font-weight: 700; color: #B45309; }
 .tl2-leg.tight .leg-text { background: #FFF4E5; color: #8A4B00; }
 .tl2-leg.tight::after { border-color: #F59E0B; }
+
+/* 설정: 화면 모드 */
+.seg-btns { display: flex; gap: 6px; }
+.seg-btns .btn { flex: 1; }

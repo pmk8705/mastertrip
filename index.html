@@ -15,6 +15,8 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="styles.css">
+  <!-- 화면 모드(자동/밝게/어둡게)를 그리기 전에 적용해 깜빡임 방지 -->
+  <script>try { var t = localStorage.getItem('mastertrip-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 </head>
 <body>
   <!-- 홈·내 여행: 노을 배경 상단 -->
