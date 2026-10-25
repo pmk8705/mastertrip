@@ -2303,17 +2303,46 @@ function closeViewer() {
 
 /* ---------- 비상 서류 (여권 사본·보험·E-티켓) — 여행과 상관없이 하나, 예약 탭 맨 위 ---------- */
 // 파일은 바우처와 같은 IndexedDB(voucherDb), 목록은 state.vault.docs. 백업에는 들어가고 여행 보내기 파일에는 안 들어간다.
-// PIN은 남이 잠깐 볼 때 바로 안 보이게 하는 가림막일 뿐(저장된 파일은 암호화되지 않음). 진짜 보호는 폰 잠금.
-let vaultOpen = false; // 이번에 PIN을 맞혔는지 (앱이 뒤로 가면 다시 잠금)
-const vault = () => (state.vault = state.vault || { docs: [], pin: '' });
-async function pinHash(pin) {
-  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('mastertrip:' + pin));
-  return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join('');
+// 잠금 = 폰 잠금(지문·얼굴·패턴·비밀번호)으로 확인 (WebAuthn 패스키, 서버 없이 폰 안에서만). 잊을 PIN이 없다.
+// 파일 자체를 암호화하지는 않는다: 폰을 잠깐 빌려준 사람·주운 사람은 막지만, 개발 도구로 저장소를 뒤지는 사람까지는 못 막는다.
+let vaultOpen = false; // 이번에 폰 잠금으로 확인했는지 (앱이 뒤로 가면 다시 잠금)
+const vault = () => (state.vault = state.vault || { docs: [], lock: '' }); // lock = 패스키 id (base64url)
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const canPhoneLock = async () => {
+  try { return !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch (e) { return false; }
+};
+// 폰 잠금 켜기: 이 폰에 패스키를 하나 만든다 (만들 때도 지문·패턴 확인)
+async function lockOn() {
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: { name: 'MasterTrip' },
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'mastertrip-vault', displayName: 'MasterTrip 비상 서류' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+      timeout: 60000,
+    },
+  });
+  return b64u(cred.rawId);
+}
+// 폰 잠금 확인: 성공 + '사용자 확인(UV)' 표시가 있어야 연다
+async function phoneUnlock(lock) {
+  const got = await navigator.credentials.get({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      allowCredentials: [{ type: 'public-key', id: unb64u(lock), transports: ['internal'] }],
+      userVerification: 'required',
+      timeout: 60000,
+    },
+  });
+  const flags = new Uint8Array(got.response.authenticatorData)[32];
+  return !!(flags & 0x04);
 }
 function vaultCard() {
   const v = vault();
   const n = v.docs.filter((d) => !d.from).length;
-  const lock = v.pin ? `<span class="muted small">${vaultOpen ? '🔓' : '🔒'}</span>` : '';
+  const lock = v.lock ? `<span class="muted small">${vaultOpen ? '🔓' : '🔒'}</span>` : '';
   return `
     <div class="card vault">
       <div class="row"><b>🛂 비상 서류</b>${lock}<span class="spacer"></span>
@@ -2322,37 +2351,28 @@ function vaultCard() {
       <div class="muted small">여권 사본·여행자 보험·E-티켓 · 인터넷 없이 열려요. 카드 분실 신고 번호는 아래 긴급 연락처에.</div>
     </div>`;
 }
-// PIN이 있으면 먼저 물어본다
-function withVault(fn) {
+// 잠금이 켜져 있으면 먼저 폰 잠금으로 확인한다
+async function withVault(fn) {
   const v = vault();
-  if (!v.pin || vaultOpen) return fn();
-  openModal({
-    title: '🔒 비상 서류',
-    fields: [{ name: 'pin', label: 'PIN 4자리', type: 'password', required: true }],
-    html: '',
-    saveLabel: '열기',
-    onSave: (d) => {
-      pinHash(d.pin).then((h) => {
-        if (h !== v.pin) { toast('PIN이 달라요'); return; }
-        vaultOpen = true;
-        modal.close();
-        render();
-        fn();
-      });
-      return false; // 맞는지 확인한 뒤 직접 닫는다
-    },
-  });
-  const pin = $('#modalBody input[name=pin]');
-  pin.inputMode = 'numeric';
-  pin.maxLength = 4;
-  $('#modalBody').insertAdjacentHTML('beforeend', '<button type="button" class="link-btn" id="pinForgot">PIN을 잊었어요</button>');
-  $('#pinForgot').onclick = () => {
-    if (!confirm('PIN 가림막만 없앨까요? 서류는 그대로 남아요.')) return;
-    v.pin = '';
-    save();
-    modal.close();
+  if (!v.lock || vaultOpen) return fn();
+  try {
+    if (!(await phoneUnlock(v.lock))) throw new Error('확인 안 됨');
+    vaultOpen = true;
     render();
-  };
+    fn();
+  } catch (e) {
+    console.warn('폰 잠금 확인 실패', e);
+    // 그냥 취소한 경우가 대부분이라 지우기는 두 번 묻는다
+    if (confirm('폰 잠금으로 확인하지 못했어요.\n\n폰을 바꿨거나 패스키를 지웠다면 열 수 없어요. 서류를 모두 지우고 잠금을 끌까요?\n(그냥 다시 시도하려면 취소)')
+      && confirm('비상 서류를 모두 지워요. 되돌릴 수 없어요. 계속할까요?')) {
+      deleteVouchers(v.docs);
+      v.docs = [];
+      v.lock = '';
+      save();
+      render();
+      toast('비상 서류를 지우고 잠금을 껐어요');
+    }
+  }
 }
 function vaultForm() {
   const v = vault();
@@ -2360,24 +2380,46 @@ function vaultForm() {
     title: '🛂 비상 서류',
     html: `<p class="small muted" style="margin-top:0">여권 사본(사진 면), 여행자 보험 증권, 항공 E-티켓 등. 모든 여행에서 같이 보여요.<br>
       ⚠ 백업 파일에는 함께 들어가니 백업 파일을 남에게 보내지 마세요. '여행 보내기' 파일에는 들어가지 않아요.</p>`,
-    onSave: (d) => {
-      if (d.pin && !/^\d{4}$/.test(d.pin)) { toast('PIN은 숫자 4자리예요'); return false; }
+    onSave: () => {
       const prev = v.docs;
       v.docs = files.list();
       files.commit(prev).catch(() => toast('서류 저장에 실패했어요'));
-      if (d.pin) pinHash(d.pin).then((h) => { v.pin = h; vaultOpen = true; save(); render(); toast('PIN 가림막을 정했어요'); });
     },
   });
   const files = fileListEditor(v.docs, '서류 (사진·PDF)');
-  $('#modalBody').insertAdjacentHTML('beforeend', fieldHtml({
-    name: 'pin', type: 'password', label: v.pin ? 'PIN 바꾸기 (숫자 4자리, 비우면 그대로)' : 'PIN 가림막 (선택, 숫자 4자리)',
-    placeholder: v.pin ? '바꿀 때만 입력' : '안 쓰려면 비워 두세요',
-  }) + `<p class="small muted" style="margin:-4px 0 8px">PIN은 남이 잠깐 볼 때 바로 안 보이게 하는 가림막이에요. 진짜 보호는 폰 잠금이에요.</p>
-    ${v.pin ? '<button type="button" class="link-btn" id="pinOff">PIN 가림막 끄기</button>' : ''}`);
-  const pin = $('#modalBody input[name=pin]');
-  pin.inputMode = 'numeric';
-  pin.maxLength = 4;
-  if (v.pin) $('#pinOff').onclick = () => { v.pin = ''; save(); $('#pinOff').remove(); toast('PIN 가림막을 껐어요'); };
+  $('#modalBody').insertAdjacentHTML('beforeend', `
+    <div class="field"><span>잠금</span><div id="lockRow" class="small muted">확인하는 중…</div></div>`);
+  const row = $('#lockRow');
+  const draw = async () => {
+    if (v.lock) {
+      row.innerHTML = '🔒 <b>폰 잠금(지문·패턴)</b>으로 열려요 · <button type="button" class="link-btn" id="lockBtn">잠금 끄기</button>';
+    } else if (await canPhoneLock()) {
+      row.innerHTML = '<button type="button" class="btn sm" id="lockBtn">🔐 폰 잠금(지문·패턴)으로 가리기</button><div style="margin-top:4px">볼 때마다 지문이나 폰 잠금을 확인해요. 폰에 MasterTrip 패스키가 하나 만들어져요.</div>';
+    } else {
+      row.textContent = '이 기기는 폰 잠금 연동을 쓸 수 없어요. 폰 자체 잠금을 꼭 켜 두세요.';
+      return;
+    }
+    $('#lockBtn').onclick = async () => {
+      if (v.lock) {
+        v.lock = '';
+        save();
+        toast('잠금을 껐어요');
+      } else {
+        try {
+          v.lock = await lockOn();
+          vaultOpen = true;
+          save();
+          toast('이제 폰 잠금으로 확인해야 열려요');
+        } catch (e) {
+          console.warn('패스키 만들기 실패', e);
+          toast('폰 잠금 연결을 하지 못했어요');
+        }
+      }
+      render();
+      draw();
+    };
+  };
+  draw();
 }
 
 function renderBook(trip) {
@@ -2781,6 +2823,7 @@ function importData(ev) {
       delete data.covers;
       delete data.vouchers;
       delete data.photos;
+      if (data.vault) data.vault.lock = ''; // 패스키는 원래 폰에만 있어서 다른 폰에선 못 연다 → 잠금은 끈 채로
       state = migrate(data); pickTrip(null); openTripId = null; save(); render(); toast('가져오기 완료');
       clearCovers()
         .then(() => Promise.all(Object.entries(covers).map(([id, url]) => fetch(url).then((r) => r.blob()).then((b) => setCover(id, b)))))
@@ -2834,7 +2877,7 @@ $('#view').addEventListener('click', (ev) => {
     case 'geocode-all': geocodeAll(detailTrip()); break;
     case 'search-close': searchOpen = false; searchQuery = ''; render(); break;
     case 'goto-sub': pickTrip(id); mainTab = 'trips'; remember('main', mainTab); setSub(el.dataset.v); window.scrollTo(0, 0); break;
-    case 'export': exportData(); break;
+    case 'export': withVault(exportData); break; // 백업에 비상 서류가 들어가니 잠금이 켜져 있으면 확인 후
     case 'import-file': importPicker.click(); break;
     case 'vault-view': withVault(() => openVoucher({ title: '🛂 비상 서류', vouchers: vault().docs })); break;
     case 'vault-edit': withVault(vaultForm); break;
