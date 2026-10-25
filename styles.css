@@ -796,3 +796,26 @@ hr.soft { border: 0; border-top: 1px solid var(--line); margin: 8px 0 10px; }
 }
 .pay-seg input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
 .pay-seg input:focus-visible + span { outline: 2px solid var(--accent); }
+
+/* 회화 카드: 예약 탭 바로가기 + 전체 화면(흰 바탕, 큰 글씨) */
+.phrase-card { gap: 12px; cursor: pointer; }
+.phrase-card .emo { font-size: 24px; }
+.phrase-card .grow { flex: 1; min-width: 0; }
+.phrase-card .go { font-size: 20px; color: var(--muted); }
+.phrase-cats { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; scrollbar-width: none; }
+.phrase-cats button { flex: 0 0 auto; border: 1px solid #ccc; background: #fff; color: #111; border-radius: 99px; padding: 8px 14px; font-size: 15px; cursor: pointer; }
+.phrase-cats button.on { background: #111; color: #fff; border-color: #111; font-weight: 700; }
+.phrase-row {
+  display: block; width: 100%; text-align: left; cursor: pointer; background: #fff; color: #111;
+  border: 1px solid #e2e2e2; border-radius: 12px; padding: 12px 14px; margin-bottom: 8px;
+}
+.phrase-row b { display: block; font-size: 16px; }
+.phrase-row span { display: block; font-size: 14px; color: #666; margin-top: 2px; }
+.phrase-show { min-height: 55vh; display: flex; flex-direction: column; justify-content: center; text-align: center; padding: 20px 8px; gap: 22px; }
+.ps-main { font-size: 32px; font-weight: 800; line-height: 1.3; color: #000; word-break: keep-all; }
+.ps-en { font-size: 21px; color: #555; line-height: 1.35; }
+.ps-ko { font-size: 15px; color: #777; line-height: 1.5; }
+.ps-ko span { color: #b45309; }
+.ps-nav { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.ps-nav .btn { background: #fff; color: #111; border-color: #ccc; }
+.ps-nav .btn:disabled { opacity: .35; }

@@ -1,11 +1,12 @@
 // 앱 파일을 폰에 저장해 두고 인터넷 없이도 열리게 한다.
 // 앱 파일을 수정해서 다시 배포할 때는 CACHE 이름의 숫자를 올린다.
-const CACHE = 'mastertrip-v50';
+const CACHE = 'mastertrip-v51';
 const ASSETS = [
   './',
   'index.html',
   'styles.css',
   'data.js',
+  'phrases.js',
   'app.js',
   'manifest.webmanifest',
   'img/header.jpg',

@@ -806,7 +806,8 @@ function renderToday() {
       ${day ? wxHtml(day).replace('class="wx', 'class="card wx') : ''}
       <div class="card" style="padding:4px 14px"><ul class="today-list">${items}</ul></div>
       <div class="card row"><span>오늘 지출</span><span class="spacer"></span><b class="num">${won(spent)}</b>
-        <button class="btn sm" data-act="goto-sub" data-v="budget" data-id="${t.id}">기록하기</button></div>`;
+        <button class="btn sm" data-act="goto-sub" data-v="budget" data-id="${t.id}">기록하기</button></div>
+      ${phraseCard(t).replace('data-act="phrases"', `data-act="phrases" data-id="${t.id}"`)}`;
   } else if (p === 'soon') {
     const all = t.checklist;
     const done = all.filter((c) => c.done).length;
@@ -2730,6 +2731,61 @@ function vaultCard() {
       <div class="muted small">여권 사본·여행자 보험·E-티켓 · 인터넷 없이 열려요. 카드 분실 신고 번호는 아래 긴급 연락처에.</div>
     </div>`;
 }
+/* ---------- 오프라인 회화 카드 (phrases.js): 현지인에게 화면을 보여 주며 말하기 ---------- */
+// 스페인어 나라면 스페인어를 가장 크게, 다른 해외 여행이면 영어를 크게. 국내 여행엔 안 보임.
+const phraseLang = (trip) => PHRASE_LANG[(guessCountry(trip.places || '') || {}).name] || 'en';
+function phraseCard(trip) {
+  if (trip.region === '국내') return '';
+  const es = phraseLang(trip) === 'es';
+  return `
+    <div class="card phrase-card row" data-act="phrases">
+      <span class="emo">🗣</span>
+      <span class="grow"><b>회화 카드</b><br><span class="muted small">${es ? '스페인어 · 영어' : '영어'} · 인사·식당·숙소·교통·쇼핑·긴급 · 인터넷 없이 열려요</span></span>
+      <span class="go">›</span>
+    </div>`;
+}
+
+async function openPhrases(trip) {
+  const lang = phraseLang(trip);
+  const list = PHRASES.es; // 영어도 함께 들어 있다
+  const cats = [...new Set(list.map((p) => p.cat))];
+  let cat = cats[0];
+  const el = viewerShell('🗣 회화 카드');
+  const body = el.querySelector('.viewer-body');
+  try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* 지원 안 하면 그냥 */ }
+  const main = (p) => (lang === 'es' ? p.es : p.en);
+  const drawList = () => {
+    body.innerHTML = `<div class="phrase-cats">${cats.map((c) => `<button type="button" class="${c === cat ? 'on' : ''}" data-pcat="${c}">${c}</button>`).join('')}</div>
+      ${list.map((p, i) => (p.cat === cat ? `<button type="button" class="phrase-row" data-pi="${i}"><b>${esc(p.ko)}</b><span>${esc(main(p))}</span></button>` : '')).join('')}
+      <p class="viewer-note">문장을 누르면 크게 보여 줘요 · 화면이 꺼지지 않아요</p>`;
+    body.scrollTop = 0;
+  };
+  const show = (i) => {
+    const p = list[i];
+    const inCat = list.map((x, j) => (x.cat === p.cat ? j : -1)).filter((j) => j >= 0);
+    const k = inCat.indexOf(i);
+    body.innerHTML = `<div class="phrase-show">
+        <div class="ps-main">${esc(main(p))}</div>
+        ${lang === 'es' ? `<div class="ps-en">${esc(p.en)}</div>` : ''}
+        <div class="ps-ko">${esc(p.ko)}${lang === 'es' ? `<br><span>${esc(p.say)}</span>` : ''}</div>
+      </div>
+      <div class="ps-nav">
+        <button type="button" class="btn" data-pi="${inCat[k - 1] ?? ''}" ${k > 0 ? '' : 'disabled'}>‹ 이전</button>
+        <button type="button" class="btn" data-plist>목록</button>
+        <button type="button" class="btn" data-pi="${inCat[k + 1] ?? ''}" ${k < inCat.length - 1 ? '' : 'disabled'}>다음 ›</button>
+      </div>`;
+    body.scrollTop = 0;
+  };
+  body.addEventListener('click', (ev) => {
+    const c = ev.target.closest('[data-pcat]');
+    if (c) { cat = c.dataset.pcat; return drawList(); }
+    if (ev.target.closest('[data-plist]')) return drawList();
+    const b = ev.target.closest('[data-pi]');
+    if (b && b.dataset.pi !== '') show(Number(b.dataset.pi));
+  });
+  drawList();
+}
+
 // 잠금이 켜져 있으면 먼저 폰 잠금으로 확인한다
 async function withVault(fn) {
   const v = vault();
@@ -2825,7 +2881,7 @@ function renderBook(trip) {
       <a class="call-btn" href="tel:${esc(c.phone.replace(/[^+\d]/g, ''))}">전화</a>
     </div>`).join('');
 
-  return `${vaultCard()}
+  return `${vaultCard()}${phraseCard(trip)}
     ${missing ? `<div class="notice">아직 예약번호를 입력하지 않은 항목이 ${missing}개 있어요. 예약하면 바로 입력해 두세요.</div>` : ''}
     <div class="card" style="padding:4px 14px">${rows || '<div class="empty-state">예약이 없어요</div>'}</div>
     <button class="add-btn" data-act="add-book">+ 예약 추가</button>
@@ -3253,6 +3309,7 @@ $('#view').addEventListener('click', (ev) => {
     case 'import-file': importPicker.click(); break;
     case 'vault-view': withVault(() => openVoucher({ title: '🛂 비상 서류', vouchers: vault().docs })); break;
     case 'vault-edit': withVault(vaultForm); break;
+    case 'phrases': openPhrases(id ? getTrip(id) : ft); break;
     case 'day-note': noteForm(ft, el.dataset.date); break;
     case 'story': openStory(ft); break;
     case 'photo-add': photoTarget = { tripId: ft.id, date: el.dataset.date }; photoPicker.click(); break;
