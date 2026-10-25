@@ -1,16 +1,18 @@
 ﻿param(
-  [string]$Src = (Join-Path $PSScriptRoot 'icon-source.webp'),
+  [string]$Src = (Join-Path $PSScriptRoot 'icon-source.jpg'),
   [string]$OutDir = (Join-Path $PSScriptRoot '..\icons'),
   [string]$WorkDir = $env:TEMP,
-  [double]$InsetRatio = 0.06,  # crop away the rounded corners drawn into the source art
-  [double]$Scale = 0.76        # maskable: artwork size inside the safe zone
+  [double]$InsetRatio = 0.08,  # crop away the rounded corners (and the small corner sparkle) drawn into the source art
+  [double]$Scale = 0.76,       # maskable: artwork size inside the safe zone
+  # Gemini sparkle watermark to paint over: x, y, w, h as ratios of the source size (empty = none)
+  [double[]]$Patch = @(0.856, 0.855, 0.06, 0.058)
 )
 # Usage: powershell -File tools\make-icons.ps1
 # Writes icon-192/512 + apple-touch-icon (full-bleed artwork) and icon-maskable-192/512
 # (artwork shrunk into the 80% safe zone, margin filled with each row's edge color).
 Add-Type -AssemblyName PresentationCore, WindowsBase, System.Drawing
 
-# 1) Decode WebP via WIC and crop away the drawn rounded corners -> full-res PNG
+# 1) Decode (WebP/JPEG/PNG) via WIC and crop away the drawn rounded corners -> full-res PNG
 $stream = [IO.File]::OpenRead($Src)
 $frame = [System.Windows.Media.Imaging.BitmapDecoder]::Create($stream, 'PreservePixelFormat', 'OnLoad').Frames[0]
 $stream.Close()
@@ -22,6 +24,25 @@ $enc = [System.Windows.Media.Imaging.PngBitmapEncoder]::new()
 $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($conv))
 $masterPath = Join-Path $WorkDir 'master-crop.png'
 $fs = [IO.File]::Create($masterPath); $enc.Save($fs); $fs.Close()
+
+# 1b) Paint over the watermark: each row is filled with a straight blend between the pixels
+#     just left and right of the box (the sand bands run roughly horizontally there)
+if ($Patch.Count -eq 4) {
+  $loaded = [System.Drawing.Bitmap]::FromFile($masterPath)
+  $master = [System.Drawing.Bitmap]::new($loaded); $loaded.Dispose()
+  $srcSide = [Math]::Min($frame.PixelWidth, $frame.PixelHeight)
+  $px0 = [int]($Patch[0] * $srcSide) - $inset; $py0 = [int]($Patch[1] * $srcSide) - $inset
+  $pw = [int]($Patch[2] * $srcSide); $ph = [int]($Patch[3] * $srcSide)
+  for ($y = $py0; $y -lt $py0 + $ph; $y++) {
+    $cl = $master.GetPixel($px0 - 1, $y); $cr = $master.GetPixel($px0 + $pw, $y)
+    for ($x = $px0; $x -lt $px0 + $pw; $x++) {
+      $t = ($x - $px0 + 1) / ($pw + 1)
+      $master.SetPixel($x, $y, [System.Drawing.Color]::FromArgb(255,
+        [int]($cl.R * (1 - $t) + $cr.R * $t), [int]($cl.G * (1 - $t) + $cr.G * $t), [int]($cl.B * (1 - $t) + $cr.B * $t)))
+    }
+  }
+  $master.Save($masterPath, [System.Drawing.Imaging.ImageFormat]::Png); $master.Dispose()
+}
 
 # 2) Fast pixel work in C#
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'

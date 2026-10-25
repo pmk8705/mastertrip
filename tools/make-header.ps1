@@ -1,7 +1,7 @@
-param(
-  [string]$Src = (Join-Path $PSScriptRoot 'header-source.webp'),
+﻿param(
+  [string]$Src = (Join-Path $PSScriptRoot 'header-source.jpg'),
   [string]$Out = (Join-Path $PSScriptRoot '..\img\header.jpg'),
-  [int]$Width = 1200
+  [int]$Width = 0  # 0 = keep the source width (never upscale a small source)
 )
 # Note: PowerShell variable names ignore case, so $src/$Src or $out/$Out would collide.
 # Usage: powershell -ExecutionPolicy Bypass -File tools\make-header.ps1
@@ -30,6 +30,7 @@ $patch = $bmp.Clone($from, $bmp.PixelFormat)
 $g.DrawImage($patch, $box)
 $g.Dispose()
 
+if ($Width -le 0 -or $Width -gt $imgW) { $Width = $imgW }
 $newH = [int]([double]$imgH * $Width / $imgW)
 $resized = [System.Drawing.Bitmap]::new($Width, $newH)
 $g2 = [System.Drawing.Graphics]::FromImage($resized)

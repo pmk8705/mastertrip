@@ -319,12 +319,12 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 .topbar .icon-btn { flex: 0 0 auto; }
 
 /* 홈·내 여행 상단: 로고가 그려진 노을 배너 (img/header.jpg, tools/make-header.ps1로 생성).
-   그림 속 글자가 잘리지 않도록 높이를 그림 비율(1200x396)에 맞춘다. */
+   그림 속 글자가 잘리지 않도록 높이를 그림 비율(1024x335)에 맞춘다. */
 .hero {
   position: relative; padding-top: env(safe-area-inset-top);
-  background: #26304a url('img/header.jpg') center bottom / 100% auto no-repeat;
+  background: #f0a35e url('img/header.jpg') center bottom / 100% auto no-repeat;
 }
-.hero::before { content: ''; display: block; aspect-ratio: 1200 / 396; }
+.hero::before { content: ''; display: block; aspect-ratio: 1024 / 335; }
 .hero[hidden] { display: none; }
 /* 여행 탭: 얇은 띠 (그림 오른쪽 위 노을 하늘만 — 글자·배가 반쯤 잘려 보이지 않게) */
 .hero.slim { background-size: 170% auto; background-position: 100% 8%; }
