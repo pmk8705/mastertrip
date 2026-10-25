@@ -107,6 +107,7 @@ function normalizeTrip(t) {
   autoLinkBookings(t);
   t.budget = t.budget || {};
   t.budget.rate = t.budget.rate || 1;
+  if (t.budget.rateAuto == null) t.budget.rateAuto = true; // 환율 자동 (하루 한 번 갱신). 직접 입력하면 false
   t.budget.plan = t.budget.plan || {};
   return t;
 }
@@ -167,6 +168,53 @@ function money(n, cur) {
   const v = (Math.round(n * 100) / 100).toLocaleString('ko-KR');
   return SYMBOLS[cur] ? SYMBOLS[cur] + v : `${v} ${cur}`;
 }
+// 1단위 = ?원. 원 단위가 작은 통화(엔 8.447, 동 0.0513)도 유효숫자 4자리
+const roundRate = (r) => (r >= 1000 ? Math.round(r * 10) / 10 : Number(r.toPrecision(4)));
+
+/* ---------- 환율 자동 ---------- */
+// Frankfurter(유럽중앙은행, 키 없음, 평일 갱신) → 없는 통화(TWD·VND 등)는 open.er-api.com
+async function fetchRate(cur) {
+  try {
+    const r = await fetch(`https://api.frankfurter.dev/v1/latest?base=${cur}&symbols=KRW`);
+    if (r.ok) {
+      const j = await r.json();
+      if (j.rates && j.rates.KRW > 0) return { rate: j.rates.KRW, date: j.date };
+    }
+  } catch (e) { /* 아래 예비 사이트로 */ }
+  const r = await fetch(`https://open.er-api.com/v6/latest/${cur}`);
+  const j = await r.json();
+  if (j.result !== 'success' || !(j.rates && j.rates.KRW > 0)) throw new Error('환율 없음: ' + cur);
+  return { rate: j.rates.KRW, date: ymd(new Date(j.time_last_update_unix * 1000)) };
+}
+
+// 자동 환율 여행만, 하루 한 번 (force = 지금 바로). 실패하면 마지막 환율 그대로 둔다.
+let rateBusy = false;
+async function refreshRates(force) {
+  if (rateBusy || !navigator.onLine) return;
+  const today = todayStr();
+  const due = state.trips.filter((t) => t.currency !== 'KRW' && t.budget.rateAuto && (force || t.budget.rateAt !== today));
+  if (!due.length) return;
+  rateBusy = true;
+  const got = {};
+  for (const cur of new Set(due.map((t) => t.currency))) {
+    try { got[cur] = await fetchRate(cur); } catch (e) { console.warn('환율 불러오기 실패', cur, e); }
+  }
+  rateBusy = false;
+  let changed = false;
+  for (const t of due) {
+    const g = got[t.currency];
+    if (!g) continue;
+    Object.assign(t.budget, { rate: roundRate(g.rate), rateDate: g.date, rateAt: today });
+    changed = true;
+  }
+  if (changed) { save(); render(); }
+}
+function rateNote(trip) {
+  const b = trip.budget;
+  if (!b.rateAuto) return '직접 입력';
+  return b.rateDate ? `자동 · ${b.rateDate.slice(5).replace('-', '/')} 기준` : '자동 · 인터넷 연결 때 불러와요';
+}
+
 const isHHMM = (t) => /^\d{1,2}:\d{2}$/.test(t || '');
 const hhmm = (t) => t.padStart(5, '0');
 
@@ -615,7 +663,8 @@ function renderRecords() {
 
 function tripForm(trip) {
   const isNew = !trip;
-  const t = trip || { emoji: '✈️', title: '', places: '', start: '', end: '', region: '해외', currency: 'EUR', budget: { rate: '' }, people: 2 };
+  const t = trip || { emoji: '✈️', title: '', places: '', start: '', end: '', region: '해외', currency: 'EUR', budget: { rate: '', rateAuto: true }, people: 2 };
+  const autoRate = t.budget.rateAuto && t.region !== '국내';
   openModal({
     title: isNew ? '새 여행 만들기' : '여행 정보 수정',
     html: `<div class="field-row emoji-row">${fieldHtml({ name: 'emoji', label: '아이콘', value: t.emoji })}${fieldHtml({ name: 'title', label: '여행 이름', value: t.title, required: true, placeholder: '예: 제주도 힐링 여행' })}</div>`,
@@ -626,16 +675,19 @@ function tripForm(trip) {
       { name: 'people', label: '인원 (숙소·항공 찾기에 쓰여요)', type: 'number', value: t.people },
       { name: 'region', label: '지역', type: 'select', options: ['해외', '국내'], value: t.region },
       { name: 'currency', label: '현지 통화 (해외)', value: t.currency, list: CURRENCIES, placeholder: '예: EUR, USD, JPY' },
-      { name: 'rate', label: '환율: 현지 통화 1단위 = ?원 (해외)', type: 'number', value: t.region === '국내' ? '' : t.budget.rate },
+      { name: 'rate', label: '환율: 현지 통화 1단위 = ?원 (비우면 자동)', type: 'number', value: autoRate || t.region === '국내' ? '' : t.budget.rate,
+        placeholder: autoRate && t.budget.rate > 1 ? `자동 (지금 ${t.budget.rate}원)` : '자동' },
     ],
     onSave: (d) => {
       if (!d.start || !d.end || d.end < d.start) { toast('날짜를 확인하세요 (도착일이 출발일보다 빠름)'); return false; }
       if (diffDays(d.end, d.start) > 120) { toast('여행 기간은 120일까지 가능해요'); return false; }
       let currency = (d.currency || '').toUpperCase();
       let rate = parseFloat(d.rate);
-      if (d.region === '국내' || currency === 'KRW') { currency = 'KRW'; rate = 1; }
+      let rateAuto = !d.rate; // 비우면 자동
+      if (d.region === '국내' || currency === 'KRW') { currency = 'KRW'; rate = 1; rateAuto = true; }
       else if (!currency) { toast('현지 통화를 입력하세요'); return false; }
-      else if (!(rate > 0)) { toast('환율을 입력하세요'); return false; }
+      else if (rateAuto) rate = trip && trip.currency === currency ? trip.budget.rate : 1; // 곧 자동으로 불러옴
+      else if (!(rate > 0)) { toast('환율을 확인하세요'); return false; }
       const people = Math.min(9, Math.max(1, Math.round(Number(d.people)) || 2)); // 아고다·스카이스캐너 검색 인원 (1~9명)
 
       if (isNew) {
@@ -644,11 +696,12 @@ function tripForm(trip) {
           id: 'trip-' + uid(), title: d.title, emoji: d.emoji || '✈️', places: d.places, region: d.region, people,
           currency, start: d.start, end: d.end, days: buildDays(d.start, d.end, []),
           checklist: tpl.checklist, contacts: tpl.contacts,
-          budget: { rate, plan: Object.fromEntries(CATS.map((k) => [k, 0])) },
+          budget: { rate, rateAuto, plan: Object.fromEntries(CATS.map((k) => [k, 0])) },
         });
         state.trips.push(nt);
         applyCoverChoice(nt.id);
         save();
+        if (rateAuto) refreshRates(true);
         openTrip(nt.id);
         toast('여행을 만들었어요');
         return;
@@ -661,7 +714,8 @@ function tripForm(trip) {
       }
       Object.assign(trip, { title: d.title, emoji: d.emoji || '✈️', places: d.places, region: d.region, people, currency, start: d.start, end: d.end });
       applyCoverChoice(trip.id);
-      trip.budget.rate = rate;
+      Object.assign(trip.budget, { rate, rateAuto });
+      if (rateAuto) setTimeout(() => refreshRates(true)); // 저장·화면 갱신 뒤에
     },
     onDelete: isNew ? null : () => {
       state.trips = state.trips.filter((x) => x !== trip);
@@ -1532,7 +1586,7 @@ function renderBudget(trip) {
       </div>
       ${planned ? `<div class="row small" style="margin-top:10px"><span class="muted">일정에 적은 예상 경비</span><span class="spacer"></span><b class="num">${money(planned, cur)}${cur !== 'KRW' ? ` ≈ ${won(planned * rate)}` : ''}</b></div>` : ''}
       <div class="row" style="margin-top:10px">
-        <span class="muted small">${cur === 'KRW' ? '원화 여행' : `환율 ${money(1, cur)} = ${rate.toLocaleString('ko-KR')}원`}</span>
+        <span class="muted small">${cur === 'KRW' ? '원화 여행' : `환율 ${money(1, cur)} = ${rate.toLocaleString('ko-KR')}원<br>${rateNote(trip)}`}</span>
         <span class="spacer"></span>
         <button class="btn sm" data-act="edit-plan">예산${cur === 'KRW' ? '' : '·환율'} 설정</button>
       </div>
@@ -1571,19 +1625,26 @@ function expForm(trip, e) {
 }
 
 function planForm(trip) {
-  const { plan, rate } = trip.budget;
+  const { plan, rate, rateAuto } = trip.budget;
   const foreign = trip.currency !== 'KRW';
   openModal({
     title: foreign ? '예산·환율 설정 (원 단위)' : '예산 설정 (원 단위)',
     fields: [
-      ...(foreign ? [{ name: 'rate', label: `환율: 1 ${trip.currency} = ?원`, type: 'number', value: rate, required: true }] : []),
+      ...(foreign ? [{ name: 'rate', label: `환율: 1 ${trip.currency} = ?원 (비우면 자동)`, type: 'number', value: rateAuto ? '' : rate,
+        placeholder: rateAuto ? `자동 (지금 ${rate}원)` : '자동' }] : []),
       ...CATS.map((k) => ({ name: 'p_' + k, label: k + ' 예산', type: 'number', value: plan[k] || '' })),
     ],
     onSave: (d) => {
       if (foreign) {
-        const r = parseFloat(d.rate);
-        if (!(r > 0)) { toast('환율을 확인하세요'); return false; }
-        trip.budget.rate = r;
+        if (!d.rate) {
+          const was = trip.budget.rateAuto;
+          trip.budget.rateAuto = true;
+          if (!was) setTimeout(() => refreshRates(true)); // 직접 입력 → 자동으로 바꾸면 바로 불러오기
+        } else {
+          const r = parseFloat(d.rate);
+          if (!(r > 0)) { toast('환율을 확인하세요'); return false; }
+          Object.assign(trip.budget, { rate: r, rateAuto: false });
+        }
       }
       CATS.forEach((k) => { trip.budget.plan[k] = parseFloat(d['p_' + k]) || 0; });
     },
@@ -1858,13 +1919,14 @@ $('#view').addEventListener('touchend', (ev) => {
 }, { passive: true });
 
 // 인터넷이 끊기거나 다시 연결되면 지도 표시를 바꾼다
-window.addEventListener('online', () => { if (inDetail()) render(); });
+window.addEventListener('online', () => { if (inDetail()) render(); refreshRates(); });
 window.addEventListener('offline', () => { if (inDetail()) render(); });
 
-// 자정이 지나면 오늘 날짜/D-day 갱신
-document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+// 자정이 지나면 오늘 날짜/D-day 갱신 (환율도 날이 바뀌었으면 다시)
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); refreshRates(); } });
 
 render();
+refreshRates();
 loadCovers().then(render);
 
 /* ============ 오프라인 (Service Worker) ============ */
