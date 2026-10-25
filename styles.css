@@ -293,6 +293,31 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 }
 .field textarea { min-height: 80px; resize: vertical; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* 여행 날짜 달력 (출발 → 도착) */
+.rcal-sum { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.rcal-box { flex: 1; border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; background: var(--bg); }
+.rcal-box.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.rcal-box small { display: block; font-size: 11px; color: var(--muted); }
+.rcal-box b { font-size: 14px; white-space: nowrap; }
+.rcal-arrow { color: var(--muted); }
+.rcal-len { font-size: 13px; font-weight: 700; color: var(--accent-ink); white-space: nowrap; }
+.rcal { border: 1px solid var(--line); border-radius: 12px; padding: 6px 8px 8px; background: var(--bg); }
+.rcal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.rcal-head b { font-size: 15px; }
+.rcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 2px; }
+.rcal-week span { text-align: center; font-size: 12px; color: var(--muted); padding: 2px 0; }
+.rcal-week span:first-child { color: var(--danger); }
+.rcal-day {
+  height: 38px; border: 0; background: none; color: var(--text); font-size: 15px; cursor: pointer; border-radius: 0;
+}
+.rcal-day.sun { color: var(--danger); }
+.rcal-day.today { font-weight: 800; text-decoration: underline; }
+.rcal-day.mid { background: var(--accent-soft); }
+.rcal-day.start, .rcal-day.end { background: var(--accent); color: var(--on-accent); font-weight: 800; }
+.rcal-day.start { border-radius: 10px 0 0 10px; }
+.rcal-day.end { border-radius: 0 10px 10px 0; }
+.rcal-day.solo { border-radius: 10px; }
 .modal-actions { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 
 #toast {

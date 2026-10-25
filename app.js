@@ -1174,11 +1174,10 @@ function tripForm(trip) {
   const otherCur = first || t.currency === 'KRW' ? '' : t.currency;
   openModal({
     title: isNew ? '새 여행 만들기' : '여행 정보 수정',
-    html: `<div class="field-row emoji-row">${fieldHtml({ name: 'emoji', label: '아이콘', value: t.emoji })}${fieldHtml({ name: 'title', label: '여행 이름', value: t.title, required: true, placeholder: '예: 제주도 힐링 여행' })}</div>`,
+    html: `<div class="field-row emoji-row">${fieldHtml({ name: 'emoji', label: '아이콘', value: t.emoji })}${fieldHtml({ name: 'title', label: '여행 이름', value: t.title, required: true, placeholder: '예: 제주도 힐링 여행' })}</div>
+      ${fieldHtml({ name: 'places', label: '여행지 (도시)', value: t.places, placeholder: '예: 제주시 · 서귀포' })}
+      ${rangeCalHtml(t.start, t.end)}`,
     fields: [
-      { name: 'places', label: '여행지 (도시)', value: t.places, placeholder: '예: 제주시 · 서귀포' },
-      { name: 'start', label: '출발일', type: 'date', value: t.start, required: true },
-      { name: 'end', label: '도착일 (돌아오는 날)', type: 'date', value: t.end, required: true },
       { name: 'people', label: '인원 (숙소·항공 찾기에 쓰여요)', type: 'number', value: t.people },
       { name: 'region', label: '지역', type: 'select', options: ['해외', '국내'], value: t.region },
       { name: 'currency', label: '현지 통화 (해외) — 여행지를 쓰면 자동으로 골라요', type: 'select', value: curPicked,
@@ -1188,7 +1187,7 @@ function tripForm(trip) {
         placeholder: autoRate && t.budget.rate > 1 ? `자동 (지금 ${t.budget.rate}원)` : '자동' },
     ],
     onSave: (d) => {
-      if (!d.start || !d.end || d.end < d.start) { toast('날짜를 확인하세요 (도착일이 출발일보다 빠름)'); return false; }
+      if (!d.start || !d.end || d.end < d.start) { toast(d.start ? '달력에서 도착일(돌아오는 날)도 눌러 주세요' : '달력에서 출발일과 도착일을 눌러 주세요'); return false; }
       if (diffDays(d.end, d.start) > 120) { toast('여행 기간은 120일까지 가능해요'); return false; }
       let currency = (curOf(d.currency) || d.currencyOther || '').toUpperCase();
       let rate = parseFloat(d.rate);
@@ -1262,6 +1261,8 @@ function tripForm(trip) {
     $('#saveTripBtn').onclick = () => shareTrip(trip, true);
   }
 
+  wireRangeCal();
+
   // 통화: 여행지 칸에서 나라·도시를 찾으면 자동 선택 (직접 고른 뒤로는 그대로). 국내면 통화·환율 칸을 숨긴다.
   const form = $('#modalForm');
   const box = (name) => form.elements[name].closest('.field');
@@ -1283,6 +1284,61 @@ function tripForm(trip) {
     curChanged();
   };
   sync();
+}
+
+/* ---------- 여행 날짜: 달력 하나에서 출발일 → 도착일 순서로 누르기 ---------- */
+// 값은 숨은 칸 start/end에 담아 폼과 함께 저장된다. 둘 다 골라진 뒤 다시 누르면 출발일부터 새로 고른다.
+function rangeCalHtml(start, end) {
+  return `<div class="field rcal-field"><span>여행 날짜 — 달력에서 출발일, 도착일 순서로 눌러요</span>
+    <input type="hidden" name="start" value="${esc(start)}"><input type="hidden" name="end" value="${esc(end)}">
+    <div class="rcal-sum" id="rcalSum"></div>
+    <div class="rcal">
+      <div class="rcal-head">
+        <button type="button" class="icon-btn" data-cal-step="-1" aria-label="이전 달">‹</button>
+        <b id="rcalMonth"></b>
+        <button type="button" class="icon-btn" data-cal-step="1" aria-label="다음 달">›</button>
+      </div>
+      <div class="rcal-grid rcal-week">${WEEK.map((w) => `<span>${w}</span>`).join('')}</div>
+      <div class="rcal-grid" id="rcalDays"></div>
+    </div>
+  </div>`;
+}
+
+function wireRangeCal() {
+  const form = $('#modalForm');
+  const inS = form.elements.start, inE = form.elements.end;
+  const base = parseDate(inS.value || todayStr());
+  let view = new Date(base.getFullYear(), base.getMonth(), 1);
+  const draw = () => {
+    const s = inS.value, e = inE.value, today = todayStr();
+    const box = (label, v, on) => `<div class="rcal-box ${on ? 'on' : ''}"><small>${label}</small><b>${v ? fmtDate(v) : '날짜 선택'}</b></div>`;
+    $('#rcalSum').innerHTML = box('출발', s, !s || (s && e)) + '<span class="rcal-arrow">→</span>' + box('도착', e, s && !e)
+      + (s && e ? `<span class="rcal-len">${diffDays(e, s) + 1}일</span>` : '');
+    $('#rcalMonth').textContent = `${view.getFullYear()}년 ${view.getMonth() + 1}월`;
+    const first = ymd(view);
+    const lead = view.getDay();
+    const count = new Date(view.getFullYear(), view.getMonth() + 1, 0).getDate();
+    let html = '<span></span>'.repeat(lead);
+    for (let i = 0; i < count; i++) {
+      const d = addDays(first, i);
+      const cls = ['rcal-day',
+        d === s && 'start', d === e && 'end', d === s && (!e || e === s) && 'solo', s && e && d > s && d < e && 'mid',
+        d === today && 'today', (lead + i) % 7 === 0 && 'sun'].filter(Boolean).join(' ');
+      html += `<button type="button" class="${cls}" data-cal-day="${d}">${i + 1}</button>`;
+    }
+    $('#rcalDays').innerHTML = html;
+  };
+  form.querySelector('.rcal').onclick = (ev) => {
+    const step = ev.target.closest('[data-cal-step]');
+    if (step) { view = new Date(view.getFullYear(), view.getMonth() + Number(step.dataset.calStep), 1); return draw(); }
+    const b = ev.target.closest('[data-cal-day]');
+    if (!b) return;
+    const d = b.dataset.calDay;
+    if (!inS.value || inE.value || d < inS.value) { inS.value = d; inE.value = ''; } // 새로 시작 (출발일보다 앞을 누르면 출발일을 옮김)
+    else inE.value = d; // 같은 날을 누르면 당일치기
+    draw();
+  };
+  draw();
 }
 
 // 여행 폼을 저장할 때 고른 사진을 줄여서 저장 (저장은 비동기라 끝나면 다시 그린다)
