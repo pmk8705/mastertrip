@@ -2780,6 +2780,7 @@ function resetAll() {
 
 async function exportData() {
   // 백업 파일에는 표지 사진·바우처·기록 사진도 함께 넣는다 (dataURL)
+  if (vault().docs.length && !confirm('백업 파일에 비상 서류(여권 사본 등)도 들어가요.\n\n파일 자체는 암호화되지 않아서, 다른 폰이나 PC에서 열면 잠금 없이 보여요. 안전한 곳에만 보관하세요.\n\n계속 내보낼까요?')) return;
   const dump = async (store) => {
     const out = {};
     try {
