@@ -302,7 +302,9 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 .rcal-box b { font-size: 14px; white-space: nowrap; }
 .rcal-arrow { color: var(--muted); }
 .rcal-len { font-size: 13px; font-weight: 700; color: var(--accent-ink); white-space: nowrap; }
-.rcal { border: 1px solid var(--line); border-radius: 12px; padding: 6px 8px 8px; background: var(--bg); }
+.rcal { border: 1px solid var(--line); border-radius: 12px; padding: 6px 8px 8px; background: var(--bg); touch-action: pan-y; overflow: hidden; }
+#rcalDays.slide-l { animation: slide-l .22s ease-out; }
+#rcalDays.slide-r { animation: slide-r .22s ease-out; }
 .rcal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 .rcal-head b { font-size: 15px; }
 .rcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 2px; }

@@ -1289,7 +1289,7 @@ function tripForm(trip) {
 /* ---------- 여행 날짜: 달력 하나에서 출발일 → 도착일 순서로 누르기 ---------- */
 // 값은 숨은 칸 start/end에 담아 폼과 함께 저장된다. 둘 다 골라진 뒤 다시 누르면 출발일부터 새로 고른다.
 function rangeCalHtml(start, end) {
-  return `<div class="field rcal-field"><span>여행 날짜 — 달력에서 출발일, 도착일 순서로 눌러요</span>
+  return `<div class="field rcal-field"><span>여행 날짜 — 출발일 → 도착일 순서로 눌러요 (좌우로 밀면 다른 달)</span>
     <input type="hidden" name="start" value="${esc(start)}"><input type="hidden" name="end" value="${esc(end)}">
     <div class="rcal-sum" id="rcalSum"></div>
     <div class="rcal">
@@ -1328,9 +1328,30 @@ function wireRangeCal() {
     }
     $('#rcalDays').innerHTML = html;
   };
-  form.querySelector('.rcal').onclick = (ev) => {
+  const cal = form.querySelector('.rcal');
+  const stepMonth = (dir) => {
+    view = new Date(view.getFullYear(), view.getMonth() + dir, 1);
+    draw();
+    const grid = $('#rcalDays');
+    grid.classList.remove('slide-l', 'slide-r');
+    void grid.offsetWidth; // 연달아 넘겨도 애니메이션이 다시 돌게
+    grid.classList.add(dir > 0 ? 'slide-l' : 'slide-r');
+  };
+  // 좌우로 밀어도 다른 달로 (일정 날짜 넘기기와 같은 기준)
+  let swipe = null;
+  cal.ontouchstart = (ev) => { const p = ev.touches[0]; swipe = { x: p.clientX, y: p.clientY }; };
+  cal.ontouchend = (ev) => {
+    if (!swipe) return;
+    const p = ev.changedTouches[0];
+    const dx = p.clientX - swipe.x, dy = p.clientY - swipe.y;
+    swipe = null;
+    if (Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx) * 0.6) return;
+    ev.preventDefault(); // 민 끝에 날짜가 눌리지 않게
+    stepMonth(dx < 0 ? 1 : -1);
+  };
+  cal.onclick = (ev) => {
     const step = ev.target.closest('[data-cal-step]');
-    if (step) { view = new Date(view.getFullYear(), view.getMonth() + Number(step.dataset.calStep), 1); return draw(); }
+    if (step) return stepMonth(Number(step.dataset.calStep));
     const b = ev.target.closest('[data-cal-day]');
     if (!b) return;
     const d = b.dataset.calDay;
