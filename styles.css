@@ -326,8 +326,8 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 }
 .hero::before { content: ''; display: block; aspect-ratio: 1200 / 396; }
 .hero[hidden] { display: none; }
-/* 여행 탭: 얇은 띠 (그림 맨 위 노을 하늘만 — 글자가 반쯤 잘려 보이지 않게) */
-.hero.slim { background-position: center top; }
+/* 여행 탭: 얇은 띠 (그림 오른쪽 위 노을 하늘만 — 글자·배가 반쯤 잘려 보이지 않게) */
+.hero.slim { background-size: 170% auto; background-position: 100% 8%; }
 .hero.slim::before { aspect-ratio: auto; height: 44px; }
 .hero.slim .hero-btn { top: calc(env(safe-area-inset-top) + 3px); width: 34px; height: 34px; }
 .hero.slim + .top-tabs { margin-top: -10px; border-radius: 14px 14px 0 0; }
@@ -438,6 +438,7 @@ dialog h2 { margin: 0 0 12px; font-size: 18px; }
 }
 .pick-new { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
 #modalBody .chips-row { margin-left: 0; margin-right: 0; padding: 0; }
+#modalBody .chip-f { padding: 8px 12px; font-size: 13px; }
 
 /* 여행 만들기 폼: 아이콘 칸은 좁게 */
 .emoji-row { grid-template-columns: 72px 1fr; }
