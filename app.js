@@ -109,6 +109,8 @@ function normalizeTrip(t) {
   t.budget.rate = t.budget.rate || 1;
   if (t.budget.rateAuto == null) t.budget.rateAuto = true; // 환율 자동 (하루 한 번 갱신). 직접 입력하면 false
   t.budget.plan = t.budget.plan || {};
+  // 지출마다 기록할 때의 환율을 박제 (나중에 환율이 바뀌어도 지난 지출의 원화는 그대로). 예전 지출은 지금 환율로 고정
+  for (const e of t.expenses) if (e.currency !== 'KRW' && !(e.rate > 0)) e.rate = t.budget.rate;
   return t;
 }
 
@@ -973,7 +975,7 @@ function tripForm(trip) {
       { name: 'currency', label: '현지 통화 (해외) — 여행지를 쓰면 자동으로 골라요', type: 'select', value: curPicked,
         options: [...COUNTRY_OPTIONS, { v: '', l: '✏️ 목록에 없는 나라 (통화 직접 입력)' }] },
       { name: 'currencyOther', label: '통화 코드 (영문 3글자)', value: otherCur, list: CURRENCIES, placeholder: '예: CAD, NZD' },
-      { name: 'rate', label: '환율: 현지 통화 1단위 = ?원 (비우면 자동)', type: 'number', value: autoRate || t.region === '국내' ? '' : t.budget.rate,
+      { name: 'rate', label: '환율: 현지 통화 1단위 = ?원 (내가 환전한 환율을 넣으면 고정, 비우면 자동)', type: 'number', value: autoRate || t.region === '국내' ? '' : t.budget.rate,
         placeholder: autoRate && t.budget.rate > 1 ? `자동 (지금 ${t.budget.rate}원)` : '자동' },
     ],
     onSave: (d) => {
@@ -1947,7 +1949,7 @@ function checkForm(trip, c) {
 
 /* ============ 예산 ============ */
 const CATS = ['항공', '숙소', '교통', '식비', '관광', '쇼핑', '기타'];
-const toKRW = (trip, e) => (e.currency === 'KRW' ? e.amount : e.amount * trip.budget.rate);
+const toKRW = (trip, e) => (e.currency === 'KRW' ? e.amount : e.amount * (e.rate || trip.budget.rate));
 
 function renderBudget(trip) {
   const { plan, rate } = trip.budget;
@@ -1999,7 +2001,7 @@ function renderBudget(trip) {
       </div>
       ${planned ? `<div class="row small" style="margin-top:10px"><span class="muted">일정에 적은 예상 경비</span><span class="spacer"></span><b class="num">${money(planned, cur)}${cur !== 'KRW' ? ` ≈ ${won(planned * rate)}` : ''}</b></div>` : ''}
       <div class="row" style="margin-top:10px">
-        <span class="muted small">${cur === 'KRW' ? '원화 여행' : `환율 ${money(1, cur)} = ${rate.toLocaleString('ko-KR')}원<br>${rateNote(trip)}`}</span>
+        <span class="muted small">${cur === 'KRW' ? '원화 여행' : `환율 ${money(1, cur)} = ${rate.toLocaleString('ko-KR')}원<br>${rateNote(trip)}${trip.budget.rateAuto ? ' <button class="link-btn" data-act="rate-refresh">🔄 새로고침</button>' : ''}`}</span>
         <span class="spacer"></span>
         <button class="btn sm" data-act="edit-plan">예산${cur === 'KRW' ? '' : '·환율'} 설정</button>
       </div>
@@ -2025,11 +2027,17 @@ function expForm(trip, e) {
       { name: 'cat', label: '분류', type: 'select', options: CATS, value: e.cat },
       { name: 'memo', label: '내용', value: e.memo, placeholder: '예: 타파스 저녁' },
       { name: 'date', label: '날짜', type: 'date', value: e.date },
+      ...(trip.currency === 'KRW' ? [] : [{ name: 'rate', label: `적용 환율: 1 ${trip.currency} = ?원 (카드 명세서 환율로 고칠 수 있어요)`, type: 'number',
+        value: e.rate || '', placeholder: `비우면 지금 환율 ${trip.budget.rate}원` }]),
     ],
     onSave: (d) => {
       const amt = parseFloat(d.amount.replace(/,/g, ''));
       if (!(amt > 0)) { toast('금액을 입력하세요'); return false; }
+      const rate = parseFloat(d.rate);
+      delete d.rate;
       Object.assign(e, d, { amount: amt });
+      if (e.currency === 'KRW') delete e.rate;
+      else e.rate = rate > 0 ? rate : trip.budget.rate; // 기록하는 순간의 환율을 박제
       if (isNew) trip.expenses.push(e);
       toast('기록했어요');
     },
@@ -2043,7 +2051,7 @@ function planForm(trip) {
   openModal({
     title: foreign ? '예산·환율 설정 (원 단위)' : '예산 설정 (원 단위)',
     fields: [
-      ...(foreign ? [{ name: 'rate', label: `환율: 1 ${trip.currency} = ?원 (비우면 자동)`, type: 'number', value: rateAuto ? '' : rate,
+      ...(foreign ? [{ name: 'rate', label: `환율: 1 ${trip.currency} = ?원 (내가 환전한 환율을 넣으면 고정, 비우면 자동)`, type: 'number', value: rateAuto ? '' : rate,
         placeholder: rateAuto ? `자동 (지금 ${rate}원)` : '자동' }] : []),
       ...CATS.map((k) => ({ name: 'p_' + k, label: k + ' 예산', type: 'number', value: plan[k] || '' })),
     ],
@@ -2619,6 +2627,11 @@ $('#view').addEventListener('click', (ev) => {
     case 'edit-check': checkForm(ft, ft.checklist.find((x) => x.id === id)); break;
     case 'add-check': checkForm(ft, null); break;
     case 'edit-plan': planForm(ft); break;
+    case 'rate-refresh':
+      if (!navigator.onLine) { toast('인터넷 연결이 필요해요'); break; }
+      toast('환율을 불러오는 중…');
+      refreshRates(true).then(() => toast(`환율: ${money(1, ft.currency)} = ${ft.budget.rate.toLocaleString('ko-KR')}원`));
+      break;
     case 'calc-add': {
       if (!(Number(calcValue) > 0)) { toast('금액을 먼저 입력하세요'); break; }
       expForm(ft, null);
