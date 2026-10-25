@@ -109,6 +109,7 @@ function normalizeTrip(t) {
   t.budget.rate = t.budget.rate || 1;
   if (t.budget.rateAuto == null) t.budget.rateAuto = true; // 환율 자동 (하루 한 번 갱신). 직접 입력하면 false
   t.budget.plan = t.budget.plan || {};
+  t.budget.cashIn = Number(t.budget.cashIn) || 0; // 환전한 현금 (여행 통화, 총액) → 남은 현금 계산
   // 지출마다 기록할 때의 환율을 박제 (나중에 환율이 바뀌어도 지난 지출의 원화는 그대로). 예전 지출은 지금 환율로 고정
   for (const e of t.expenses) if (e.currency !== 'KRW' && !(e.rate > 0)) e.rate = t.budget.rate;
   return t;
@@ -2275,6 +2276,53 @@ function checkForm(trip, c) {
 const CATS = ['항공', '숙소', '교통', '식비', '관광', '쇼핑', '기타'];
 const toKRW = (trip, e) => (e.currency === 'KRW' ? e.amount : e.amount * (e.rate || trip.budget.rate));
 
+/* ---------- 결제 수단 · 남은 현금 ---------- */
+// 지출 e.method. 예전 지출은 비어 있을 수 있다 (합계에서 '수단 없음').
+const PAY_METHODS = { 현금: '💵', 카드: '💳', 트래블카드: '🌍' };
+const PAY_KEY = 'mastertrip-paymethod'; // 마지막에 고른 수단을 다음 지출의 기본값으로
+function lastPayMethod() {
+  try { const m = localStorage.getItem(PAY_KEY); if (PAY_METHODS[m]) return m; } catch (e) {}
+  return '카드';
+}
+// 현금으로 쓴 여행 통화 금액 (원화 현금은 따로 환전한 게 아니라서 빼고 계산)
+function cashSpent(trip) {
+  return trip.expenses.filter((e) => e.method === '현금' && e.currency === trip.currency).reduce((a, e) => a + (Number(e.amount) || 0), 0);
+}
+
+function payHtml(trip) {
+  const cur = trip.currency;
+  const sums = {};
+  for (const e of trip.expenses) { const k = PAY_METHODS[e.method] ? e.method : ''; sums[k] = (sums[k] || 0) + toKRW(trip, e); }
+  const rows = [...Object.keys(PAY_METHODS), ''].filter((k) => sums[k]).map((k) => `
+    <div class="pay-sum"><span>${k ? `${PAY_METHODS[k]} ${k}` : '<span class="muted">수단 없음</span>'}</span><b class="num">${won(sums[k])}</b></div>`).join('');
+  const cashIn = trip.budget.cashIn;
+  const used = cashSpent(trip);
+  const left = cashIn - used;
+  const cash = cashIn ? `
+    <div class="cash-left">
+      <div><span class="muted small">💵 남은 현금</span><br><b class="num ${left < 0 ? 'neg' : ''}">${money(left, cur)}</b>${cur !== 'KRW' ? `<span class="muted small"> ≈ ${won(left * trip.budget.rate)}</span>` : ''}</div>
+      <div class="muted small" style="text-align:right">환전 ${money(cashIn, cur)}<br>현금 사용 ${money(used, cur)}</div>
+    </div>
+    <button class="link-btn" data-act="edit-cash">환전한 현금 고치기</button>`
+    : `<div class="row"><span class="muted small">환전한 현금을 넣으면<br>남은 현금을 알려줘요</span><span class="spacer"></span><button class="btn sm" data-act="edit-cash">💵 환전한 현금</button></div>`;
+  return `<div class="section-title"><h3>결제 수단</h3></div>
+    <div class="card">${rows}${rows ? '<hr class="soft">' : ''}${cash}</div>`;
+}
+
+function cashForm(trip) {
+  const cur = trip.currency;
+  openModal({
+    title: '💵 환전한 현금',
+    fields: [{ name: 'cashIn', label: `환전해서 가져간 현금 총액 (${cur}) — 더 환전하면 합친 금액으로 고쳐 주세요`, type: 'number', value: trip.budget.cashIn || '' }],
+    onSave: (d) => {
+      const v = d.cashIn === '' ? 0 : parseFloat(d.cashIn.replace(/,/g, ''));
+      if (!(v >= 0)) { toast('금액을 확인하세요'); return false; }
+      trip.budget.cashIn = v;
+    },
+  });
+  $('#modalBody').insertAdjacentHTML('beforeend', '<p class="muted small">지출을 기록할 때 “💵 현금”을 고르면 여기서 빠져요.</p>');
+}
+
 function renderBudget(trip) {
   const { plan, rate } = trip.budget;
   const cur = trip.currency;
@@ -2300,7 +2348,7 @@ function renderBudget(trip) {
   const expHtml = exps.length ? exps.map((e) => `
     <div class="exp-item" data-act="edit-exp" data-id="${e.id}">
       <span class="cat">${esc(e.cat)}</span>
-      <span class="memo">${esc(e.memo || '-')}<br><span class="muted small">${fmtDate(e.date)}</span></span>
+      <span class="memo">${esc(e.memo || '-')}<br><span class="muted small">${fmtDate(e.date)}${PAY_METHODS[e.method] ? ` · ${PAY_METHODS[e.method]} ${e.method}` : ''}</span></span>
       <span class="amt num">${money(e.amount, e.currency)}
         ${e.currency !== 'KRW' ? `<small>≈ ${won(toKRW(trip, e))}</small>` : ''}</span>
     </div>`).join('') : '<div class="empty-state">아직 지출 기록이 없어요</div>';
@@ -2330,6 +2378,7 @@ function renderBudget(trip) {
         <button class="btn sm" data-act="edit-plan">예산${cur === 'KRW' ? '' : '·환율'} 설정</button>
       </div>
     </div>
+    ${payHtml(trip)}
     ${cats ? `<div class="section-title"><h3>항목별</h3></div><div class="card">${cats}</div>` : ''}
     <button class="add-btn" data-act="add-exp">+ 지출 기록</button>
     <div class="section-title"><h3>지출 내역</h3><span class="muted small">${exps.length}건</span></div>
@@ -2338,7 +2387,7 @@ function renderBudget(trip) {
 
 function expForm(trip, e) {
   const isNew = !e;
-  e = e || { id: uid(), date: todayStr(), cat: '식비', amount: '', currency: trip.currency, memo: '' };
+  e = e || { id: uid(), date: todayStr(), cat: '식비', amount: '', currency: trip.currency, memo: '', method: lastPayMethod() };
   const curOptions = [...new Set([trip.currency, 'KRW', e.currency])];
   const amountRow = [
     { name: 'amount', label: '금액', type: 'number', value: e.amount, required: true },
@@ -2346,7 +2395,9 @@ function expForm(trip, e) {
   ].map(fieldHtml).join('');
   openModal({
     title: isNew ? '지출 기록' : '지출 수정',
-    html: `<div class="field-row">${amountRow}</div>`,
+    html: `<div class="field-row">${amountRow}</div>
+      <div class="field"><span>결제 수단</span><div class="pay-seg">${Object.entries(PAY_METHODS).map(([k, ic]) => `
+        <label><input type="radio" name="method" value="${k}" ${e.method === k ? 'checked' : ''}><span>${ic} ${k}</span></label>`).join('')}</div></div>`,
     fields: [
       { name: 'cat', label: '분류', type: 'select', options: CATS, value: e.cat },
       { name: 'memo', label: '내용', value: e.memo, placeholder: '예: 타파스 저녁' },
@@ -2360,6 +2411,7 @@ function expForm(trip, e) {
       const rate = parseFloat(d.rate);
       delete d.rate;
       Object.assign(e, d, { amount: amt });
+      if (d.method) try { localStorage.setItem(PAY_KEY, d.method); } catch (err) {}
       if (e.currency === 'KRW') delete e.rate;
       else e.rate = rate > 0 ? rate : trip.budget.rate; // 기록하는 순간의 환율을 박제
       if (isNew) trip.expenses.push(e);
@@ -3126,6 +3178,7 @@ $('#view').addEventListener('click', (ev) => {
     case 'edit-check': checkForm(ft, ft.checklist.find((x) => x.id === id)); break;
     case 'add-check': checkForm(ft, null); break;
     case 'edit-plan': planForm(ft); break;
+    case 'edit-cash': cashForm(ft); break;
     case 'rate-refresh':
       if (!navigator.onLine) { toast('인터넷 연결이 필요해요'); break; }
       toast('환율을 불러오는 중…');

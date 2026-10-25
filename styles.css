@@ -776,3 +776,18 @@ body.viewer-open { overflow: hidden; }
 .story-btn { margin-top: 12px; }
 .viewer-body img.story-img { max-width: 420px; border-radius: 16px; border: 0; }
 .story-btns { display: flex; gap: 8px; justify-content: center; margin: 4px 0 16px; }
+
+/* 예산: 결제 수단 · 남은 현금 */
+.pay-sum { display: flex; justify-content: space-between; padding: 5px 0; }
+hr.soft { border: 0; border-top: 1px solid var(--line); margin: 8px 0 10px; }
+.cash-left { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; }
+.cash-left b { font-size: 22px; }
+.cash-left b.neg { color: var(--danger); }
+.pay-seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.pay-seg input { position: absolute; opacity: 0; pointer-events: none; }
+.pay-seg span {
+  display: block; text-align: center; padding: 10px 4px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--bg); font-size: 14px; cursor: pointer; white-space: nowrap;
+}
+.pay-seg input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
+.pay-seg input:focus-visible + span { outline: 2px solid var(--accent); }
