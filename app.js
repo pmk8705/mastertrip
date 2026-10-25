@@ -932,6 +932,14 @@ function tripForm(trip) {
     const f = ev.target.files[0];
     if (f) $('#coverThumb').style.backgroundImage = `url('${URL.createObjectURL(f)}')`;
   };
+  if (!isNew) {
+    $('#modalBody').insertAdjacentHTML('beforeend', `
+      <div class="field"><span>함께 보기</span>
+        <button type="button" class="btn" id="shareTripBtn">📤 이 여행 보내기 (카톡 등)</button>
+        <div class="muted small" style="margin-top:4px">일정·예약·바우처가 파일 하나로 가요. 받는 사람은 설정 → 가져오기로 열면 이 여행만 추가돼요(이미 있으면 새 내용으로 바뀜).</div>
+      </div>`);
+    $('#shareTripBtn').onclick = () => shareTrip(trip);
+  }
 
   // 통화: 여행지 칸에서 나라·도시를 찾으면 자동 선택 (직접 고른 뒤로는 그대로). 국내면 통화·환율 칸을 숨긴다.
   const form = $('#modalForm');
@@ -2188,10 +2196,10 @@ function renderSettings() {
     </div>
     <div class="section-title"><h3>백업</h3></div>
     <div class="card">
-      <p class="small muted" style="margin-top:0">데이터는 이 폰 안에만 저장돼요. 폰을 바꾸거나 브라우저 데이터를 지우면 사라지니 가끔 내보내기로 백업하세요. 백업에는 모든 여행이 들어갑니다.</p>
+      <p class="small muted" style="margin-top:0">데이터는 이 폰 안에만 저장돼요. 폰을 바꾸거나 브라우저 데이터를 지우면 사라지니 가끔 내보내기로 백업하세요. 백업에는 모든 여행이 들어갑니다. 가져오기는 백업 파일과 받은 여행 파일(.mastertrip.txt)을 모두 열 수 있어요.</p>
       <div class="row" style="flex-wrap:wrap">
         <button type="button" class="btn" data-act="export">⬇ 내보내기 (백업)</button>
-        <label class="btn" style="display:inline-block">⬆ 가져오기 <input type="file" id="importInput" accept="application/json,.json" hidden></label>
+        <label class="btn" style="display:inline-block">⬆ 가져오기 <input type="file" id="importInput" accept="application/json,.json,text/plain,.txt" hidden></label>
       </div>
     </div>
     <div class="section-title"><h3>데이터</h3></div>
@@ -2232,6 +2240,75 @@ async function exportData() {
   toast('백업 파일을 저장했어요');
 }
 
+/* ---------- 여행 하나 보내기 (배우자 폰으로) ---------- */
+// 여행 하나 + 표지 사진 + 바우처를 파일 하나로. 받은 쪽은 설정 → 가져오기로 열면 그 여행만 추가(같은 여행이면 교체).
+// 크롬 공유(Web Share)는 .json을 못 보내서 .txt로 만든다 (내용은 JSON).
+const TRIP_FILE = 'mastertrip-trip';
+async function tripFileBlob(trip) {
+  const covers = {};
+  const vouchers = {};
+  try {
+    const c = await media.get(trip.id);
+    if (c) covers[trip.id] = await blobToDataUrl(c);
+    for (const v of trip.bookings.flatMap((b) => b.vouchers || [])) {
+      const blob = await voucherDb.get(v.id);
+      if (blob) vouchers[v.id] = await blobToDataUrl(blob);
+    }
+  } catch (e) { console.warn(e); }
+  const data = { type: TRIP_FILE, v: 1, sentAt: new Date().toISOString(), trip, covers, vouchers };
+  return new Blob([JSON.stringify(data)], { type: 'text/plain' });
+}
+async function shareTrip(trip) {
+  toast('보낼 파일을 만드는 중…');
+  const blob = await tripFileBlob(trip);
+  const name = `${trip.title.replace(/[\/:*?"<>|]/g, '').trim() || '여행'}.mastertrip.txt`;
+  const file = new File([blob], name, { type: 'text/plain' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: trip.title, text: 'MasterTrip 여행 파일이에요. 앱의 설정 → 가져오기로 열어 주세요.' });
+      return;
+    } catch (e) {
+      if (e.name === 'AbortError') return; // 공유 창을 닫음
+    }
+  }
+  // 공유를 못 하면 파일로 저장
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('파일로 저장했어요. 카톡 등으로 보내 주세요');
+}
+const restoreBlob = (url) => fetch(url).then((r) => r.blob());
+// 받은 여행 하나: 처음 받는 여행이면 추가, 이미 있는 여행(같은 id)이면 받은 내용으로 교체
+async function importTrip(data) {
+  const t = migrate({ trips: [data.trip] }).trips[0];
+  const old = getTrip(t.id);
+  const when = data.sentAt ? ` (${fmtDate(ymd(new Date(data.sentAt)))} 보냄)` : '';
+  const msg = old
+    ? `이미 있는 '${old.title}' 여행을 받은 파일${when} 내용으로 바꿀까요?
+이 폰에서만 고친 내용은 사라져요.`
+    : `'${t.title}' 여행을 추가할까요?${when}`;
+  if (!confirm(msg)) return;
+  if (old) {
+    // 새 파일에 없는 옛 바우처만, 다 지운 뒤에 새 것을 넣는다 (동시에 하면 새로 넣은 게 지워질 수 있음)
+    const keep = new Set(Object.keys(data.vouchers || {}));
+    await deleteVouchers(old.bookings.flatMap((b) => b.vouchers || []).filter((v) => !keep.has(v.id)));
+    state.trips[state.trips.indexOf(old)] = t;
+  } else state.trips.push(t);
+  save();
+  try {
+    for (const [id, url] of Object.entries(data.vouchers || {})) await voucherDb.set(id, await restoreBlob(url));
+    if (data.covers && data.covers[t.id]) await setCover(t.id, await restoreBlob(data.covers[t.id]));
+  } catch (e) { console.warn('사진·바우처 복원 실패', e); }
+  mainTab = 'trips';
+  remember('main', mainTab);
+  openTrip(t.id);
+  toast(old ? '받은 내용으로 바꿨어요' : '여행을 추가했어요');
+}
+
 function importData(ev) {
   const file = ev.target.files[0];
   if (!file) return;
@@ -2239,6 +2316,7 @@ function importData(ev) {
   reader.onload = () => {
     try {
       const data = JSON.parse(reader.result);
+      if (data.type === TRIP_FILE && data.trip) { importTrip(data); return; }
       const valid = Array.isArray(data.trips) || (data.trip && Array.isArray(data.days));
       if (!valid) throw new Error('형식 오류');
       if (!confirm('현재 데이터를 백업 파일 내용으로 바꿀까요?')) return;
@@ -2254,10 +2332,11 @@ function importData(ev) {
         .then(() => Promise.all(Object.entries(vouchers).map(([id, url]) => fetch(url).then((r) => r.blob()).then((b) => voucherDb.set(id, b)))))
         .catch((e) => console.warn('바우처 복원 실패', e));
     } catch (e) {
-      toast('올바른 백업 파일이 아니에요');
+      toast('올바른 백업·여행 파일이 아니에요');
     }
   };
   reader.readAsText(file);
+  ev.target.value = ''; // 같은 파일을 다시 골라도 열리게
 }
 
 /* ============ 이벤트 위임 ============ */
