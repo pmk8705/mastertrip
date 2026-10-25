@@ -714,15 +714,14 @@ function renderTopbar() {
   }
 }
 
-// 여행 탭 네 칸·기록 맨 위: 지금 보고 있는 여행 (누르면 여행 바꾸기 창) + 새 여행 + ✎ 여행 정보 수정
-// (D-day·여행 중 표시는 둘째 줄에 이미 있어서 배지 대신 '새 여행' 버튼을 둔다 — 새 여행 만드는 곳을 찾기 쉽게)
+// 여행 탭 네 칸·기록 맨 위: 지금 보고 있는 여행 (누르면 여행 바꾸기 창) + ✎ 여행 정보 수정
+// (D-day·여행 중 표시는 둘째 줄에 이미 있어서 배지는 안 단다. 새 여행은 홈 맨 아래·바꾸기 창에서)
 function tripSwitchRow(t) {
   return `<div class="trip-switch-row">
     <button type="button" class="tsr-main" data-act="switch-trip">
       <span class="emo">${esc(t.emoji)}</span>
       <span class="grow"><span class="tsr-title"><b>${esc(t.title)}</b><span class="caret">바꾸기 ▾</span></span><span class="muted small">${tripSub(t)}</span></span>
     </button>
-    <button type="button" class="tsr-new" data-act="new-trip"><b>＋</b>새 여행</button>
     <button type="button" class="icon-btn" data-act="edit-trip" aria-label="여행 정보 수정">✎</button>
   </div>`;
 }
