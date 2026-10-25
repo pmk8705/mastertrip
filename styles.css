@@ -679,3 +679,14 @@ body.viewer-open { overflow: hidden; }
   border: 1px solid var(--line); background: var(--bg); color: var(--text); font-style: italic;
 }
 .rec-note.empty { font-style: normal; color: var(--muted); border-style: dashed; }
+.rec-photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.rec-photo {
+  aspect-ratio: 1; border-radius: 10px; border: 0; padding: 0; cursor: pointer;
+  background: var(--surface-2) center / cover no-repeat;
+}
+.rec-photo.add {
+  border: 1.5px dashed var(--line); background: transparent; color: var(--muted); font-size: 22px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.rec-photo.add span { font-size: 12px; }
+.viewer-del { display: block; margin: -8px auto 18px; background: #fff; color: #b91c1c; border-color: #ddd; }

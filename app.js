@@ -405,11 +405,12 @@ function toast(msg) {
 /* ============ 여행 표지 사진 · 바우처 (IndexedDB) ============ */
 // 사진은 localStorage(약 5MB)에 넣기엔 커서 IndexedDB에 Blob으로 저장한다.
 // covers: 여행 id → 표지 사진 / vouchers: 바우처 id → 티켓 사진·PDF (목록은 booking.vouchers에)
+// photos: 사진 id → 기록 탭 하루 사진 (목록은 day.photos에, 하루 3장)
 let mediaDb;
 const openMedia = () => mediaDb || (mediaDb = new Promise((res, rej) => {
-  const r = indexedDB.open('mastertrip-media', 2);
+  const r = indexedDB.open('mastertrip-media', 3);
   r.onupgradeneeded = () => {
-    for (const name of ['covers', 'vouchers']) if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name);
+    for (const name of ['covers', 'vouchers', 'photos']) if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name);
   };
   r.onsuccess = () => res(r.result);
   r.onerror = () => rej(r.error);
@@ -435,6 +436,20 @@ function mediaStore(name) {
 }
 const media = mediaStore('covers');
 const voucherDb = mediaStore('vouchers');
+const photoDb = mediaStore('photos');
+const photoUrls = {}; // 사진 id → 화면에 쓸 주소
+async function loadPhotos() {
+  try {
+    const [keys, vals] = await Promise.all([photoDb.keys(), photoDb.values()]);
+    keys.forEach((k, i) => { photoUrls[k] = URL.createObjectURL(vals[i]); });
+  } catch (e) { console.warn('기록 사진 불러오기 실패', e); }
+}
+async function deletePhotos(ids) {
+  for (const id of ids || []) {
+    await photoDb.del(id).catch(() => {});
+    if (photoUrls[id]) { URL.revokeObjectURL(photoUrls[id]); delete photoUrls[id]; }
+  }
+}
 const coverUrls = {}; // 여행 id → 화면에 쓸 사진 주소
 
 async function loadCovers() {
@@ -869,10 +884,53 @@ function recordDay(t, d, i) {
     <div class="card rec-day">
       <div class="row"><b>Day ${i + 1}</b><span class="muted small">${fmtDate(d.date)}</span><span class="spacer"></span>${d.city ? `<span class="badge">${esc(d.city)}</span>` : ''}</div>
       <div class="rec-done">${chips || '<span class="muted small">완료 체크한 일정이 없어요</span>'}</div>
+      <div class="rec-photos">${(d.photos || []).map((id) => (photoUrls[id]
+        ? `<button type="button" class="rec-photo" style="background-image:url('${photoUrls[id]}')" data-act="photo-view" data-date="${d.date}" aria-label="사진 보기"></button>` : '')).join('')}
+        ${(d.photos || []).length < PHOTOS_PER_DAY ? `<button type="button" class="rec-photo add" data-act="photo-add" data-date="${d.date}">＋<span>사진</span></button>` : ''}</div>
       <div class="row rec-money"><span class="muted small">지출</span><span class="spacer"></span><b class="num">${won(krw)}</b>${local ? `<span class="muted small">${money(local, t.currency)}</span>` : ''}</div>
       <button type="button" class="rec-note ${d.note ? '' : 'empty'}" data-act="day-note" data-date="${d.date}">${d.note ? `“${esc(d.note)}”` : '✎ 오늘의 한 줄 남기기'}</button>
     </div>`;
 }
+// 하루 사진: 최대 3장, 긴 변 1600px JPEG. 고르기 칸은 #view 밖(importPicker와 같은 이유)
+const PHOTOS_PER_DAY = 3;
+let photoTarget = null; // { tripId, date }
+const photoPicker = Object.assign(document.createElement('input'), { type: 'file', hidden: true, accept: 'image/*', multiple: true });
+document.body.append(photoPicker);
+photoPicker.addEventListener('change', async () => {
+  const files = [...photoPicker.files];
+  photoPicker.value = '';
+  const trip = photoTarget && getTrip(photoTarget.tripId);
+  const d = trip && trip.days.find((x) => x.date === photoTarget.date);
+  if (!d) return;
+  d.photos = d.photos || [];
+  const room = PHOTOS_PER_DAY - d.photos.length;
+  if (files.length > room) toast(`하루 ${PHOTOS_PER_DAY}장까지예요. 앞의 ${room}장만 넣을게요`);
+  for (const f of files.slice(0, room)) {
+    try {
+      const blob = await shrinkImage(f, 1600);
+      const id = 'p-' + uid();
+      await photoDb.set(id, blob);
+      photoUrls[id] = URL.createObjectURL(blob);
+      d.photos.push(id);
+    } catch (e) { console.warn(e); toast('사진을 넣지 못했어요'); }
+  }
+  save();
+  render();
+});
+function openDayPhotos(trip, date) {
+  const d = trip.days.find((x) => x.date === date);
+  const el = viewerShell(`${fmtDate(date)} 사진`, (id) => {
+    if (!confirm('이 사진을 뺄까요?')) return;
+    d.photos = d.photos.filter((x) => x !== id);
+    deletePhotos([id]);
+    save();
+    history.back(); // 보기 닫기 → 화면 다시 그림
+  });
+  el.querySelector('.viewer-body').innerHTML = (d.photos || []).map((id) => (photoUrls[id]
+    ? `<img src="${photoUrls[id]}" alt=""><button type="button" class="btn sm viewer-del" data-del="${id}">이 사진 빼기</button>` : '')).join('')
+    + '<p class="viewer-note">사진을 누르면 크게</p>';
+}
+
 function noteForm(trip, date) {
   const d = trip.days.find((x) => x.date === date);
   openModal({
@@ -952,6 +1010,7 @@ function tripForm(trip) {
       state.trips = state.trips.filter((x) => x !== trip);
       removeCover(trip.id);
       deleteVouchers(trip.bookings.flatMap((x) => x.vouchers || []));
+      deletePhotos(trip.days.flatMap((d) => d.photos || []));
       if (pickedTripId === trip.id) pickTrip(null);
       if (openTripId === trip.id) closeTrip();
     },
@@ -2057,21 +2116,28 @@ const voucherBtn = (b) => (b && b.vouchers && b.vouchers.length
 // 전체 화면 보기: 흰 배경, 보는 동안 화면이 꺼지지 않게(Wake Lock). 사진을 누르면 2배 확대. 뒤로가기로 닫힘.
 let viewerUrls = [];
 let wakeLock = null;
-async function openVoucher(b) {
-  if (!b || !(b.vouchers || []).length) return;
+// 전체 화면 틀 (바우처·기록 사진 같이 씀). onAct: data-del 같은 단추를 누르면 불림
+function viewerShell(title, onAct) {
   closeViewer();
   const el = document.createElement('div');
   el.id = 'viewer';
-  el.innerHTML = `<div class="viewer-bar"><b>${esc(b.title)}</b><span class="spacer"></span><button type="button" class="btn sm" data-close>닫기 ✕</button></div>
+  el.innerHTML = `<div class="viewer-bar"><b>${esc(title)}</b><span class="spacer"></span><button type="button" class="btn sm" data-close>닫기 ✕</button></div>
     <div class="viewer-body"><p class="viewer-note">불러오는 중…</p></div>`;
   document.body.append(el);
   document.body.classList.add('viewer-open');
   history.pushState({ ...(history.state || {}), viewer: 1 }, '');
   el.onclick = (ev) => {
     if (ev.target.closest('[data-close]')) return history.back();
+    const act = ev.target.closest('[data-del]');
+    if (act && onAct) return onAct(act.dataset.del);
     const img = ev.target.closest('img');
     if (img) img.classList.toggle('zoom');
   };
+  return el;
+}
+async function openVoucher(b) {
+  if (!b || !(b.vouchers || []).length) return;
+  const el = viewerShell(b.title);
   try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* 지원 안 하면 그냥 */ }
   const parts = [];
   for (const v of [...b.vouchers].sort((x, y) => isPdf(x) - isPdf(y))) { // 사진(변환된 쪽 포함) 먼저, PDF 원본은 맨 아래
@@ -2277,10 +2343,12 @@ function resetAll() {
   state = migrate(seedData()); pickTrip(null); openTripId = null; save(); render(); toast('초기화했어요'); // migrate: 분류 등 기본값 채우기
   clearCovers().then(render);
   voucherDb.clear().catch(() => {});
+  photoDb.clear().catch(() => {});
+  Object.keys(photoUrls).forEach((k) => { URL.revokeObjectURL(photoUrls[k]); delete photoUrls[k]; });
 }
 
 async function exportData() {
-  // 백업 파일에는 표지 사진·바우처도 함께 넣는다 (dataURL)
+  // 백업 파일에는 표지 사진·바우처·기록 사진도 함께 넣는다 (dataURL)
   const dump = async (store) => {
     const out = {};
     try {
@@ -2291,7 +2359,8 @@ async function exportData() {
   };
   const covers = await dump(media);
   const vouchers = await dump(voucherDb);
-  const blob = new Blob([JSON.stringify({ ...state, covers, vouchers }, null, 2)], { type: 'application/json' });
+  const photos = await dump(photoDb);
+  const blob = new Blob([JSON.stringify({ ...state, covers, vouchers, photos }, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `mastertrip-backup-${todayStr()}.json`;
@@ -2343,7 +2412,9 @@ async function tripFileBlob(trip) {
       if (blob) vouchers[v.id] = await blobToDataUrl(blob);
     }
   } catch (e) { console.warn(e); }
-  const data = { type: TRIP_FILE, v: 1, sentAt: new Date().toISOString(), trip, covers, vouchers };
+  // 기록 사진은 각자 폰의 것이라 보내지 않는다 (파일이 너무 커짐). 한 줄 평은 보냄
+  const plain = { ...trip, days: trip.days.map(({ photos, ...d }) => d) };
+  const data = { type: TRIP_FILE, v: 1, sentAt: new Date().toISOString(), trip: plain, covers, vouchers };
   const b64 = (await blobToDataUrl(new Blob([JSON.stringify(data)]))).split(',')[1]; // UTF-8 → base64
   return tripPdf(b64);
 }
@@ -2387,6 +2458,12 @@ async function importTrip(data) {
     // 새 파일에 없는 옛 바우처만, 다 지운 뒤에 새 것을 넣는다 (동시에 하면 새로 넣은 게 지워질 수 있음)
     const keep = new Set(Object.keys(data.vouchers || {}));
     await deleteVouchers(old.bookings.flatMap((b) => b.vouchers || []).filter((v) => !keep.has(v.id)));
+    // 기록 사진은 이 폰 것을 같은 날짜에 그대로 둔다 (없어진 날의 사진만 지움)
+    for (const od of old.days) {
+      const nd = t.days.find((x) => x.date === od.date);
+      if (nd && od.photos) nd.photos = od.photos;
+      else if (od.photos) deletePhotos(od.photos);
+    }
     state.trips[state.trips.indexOf(old)] = t;
   } else state.trips.push(t);
   save();
@@ -2424,8 +2501,10 @@ function importData(ev) {
       if (!confirm('현재 데이터를 백업 파일 내용으로 바꿀까요?')) return;
       const covers = data.covers || {};
       const vouchers = data.vouchers || {};
+      const photos = data.photos || {};
       delete data.covers;
       delete data.vouchers;
+      delete data.photos;
       state = migrate(data); pickTrip(null); openTripId = null; save(); render(); toast('가져오기 완료');
       clearCovers()
         .then(() => Promise.all(Object.entries(covers).map(([id, url]) => fetch(url).then((r) => r.blob()).then((b) => setCover(id, b)))))
@@ -2433,6 +2512,11 @@ function importData(ev) {
       voucherDb.clear()
         .then(() => Promise.all(Object.entries(vouchers).map(([id, url]) => fetch(url).then((r) => r.blob()).then((b) => voucherDb.set(id, b)))))
         .catch((e) => console.warn('바우처 복원 실패', e));
+      Object.keys(photoUrls).forEach((k) => { URL.revokeObjectURL(photoUrls[k]); delete photoUrls[k]; });
+      photoDb.clear()
+        .then(() => Promise.all(Object.entries(photos).map(([id, url]) => fetch(url).then((r) => r.blob()).then((b) => photoDb.set(id, b)))))
+        .then(loadPhotos).then(render)
+        .catch((e) => console.warn('기록 사진 복원 실패', e));
     } catch (e) {
       console.warn('가져오기 실패', e);
       toast(`MasterTrip 백업·여행 파일이 아니에요 (${file.name})`);
@@ -2477,6 +2561,8 @@ $('#view').addEventListener('click', (ev) => {
     case 'export': exportData(); break;
     case 'import-file': importPicker.click(); break;
     case 'day-note': noteForm(ft, el.dataset.date); break;
+    case 'photo-add': photoTarget = { tripId: ft.id, date: el.dataset.date }; photoPicker.click(); break;
+    case 'photo-view': openDayPhotos(ft, el.dataset.date); break;
     case 'theme': setTheme(el.dataset.v); break;
     case 'reset': resetAll(); break;
     case 'open-trip': openTrip(id); break;
@@ -2642,7 +2728,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { re
 
 render();
 refreshRates();
-loadCovers().then(render);
+Promise.all([loadCovers(), loadPhotos()]).then(render);
 
 /* ============ 오프라인 (Service Worker) ============ */
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
