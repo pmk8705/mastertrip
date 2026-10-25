@@ -215,6 +215,131 @@ function rateNote(trip) {
   return b.rateDate ? `자동 · ${b.rateDate.slice(5).replace('-', '/')} 기준` : '자동 · 인터넷 연결 때 불러와요';
 }
 
+/* ---------- 현지 날씨 (Open-Meteo, 키 없음) ---------- */
+// 오늘부터 16일 안은 예보, 그 뒤는 지난해 같은 날 실제 날씨(참고). 폰에만 저장하고 백업에는 넣지 않는다.
+const WX_KEY = 'mastertrip-weather';
+const FORECAST_DAYS = 16;
+const wx = (() => { try { return JSON.parse(localStorage.getItem(WX_KEY)) || {}; } catch (e) { return {}; } })();
+wx.geo = wx.geo || {}; // 도시 이름 → { lat, lng } (못 찾으면 lat: null)
+wx.days = wx.days || {}; // '위도,경도|날짜' → { k: 'fc'(예보)|'past'(지난해), hi, lo, code, pop, ref, at }
+function saveWx() {
+  const today = todayStr();
+  for (const k of Object.keys(wx.days)) if (k.split('|')[1] < today) delete wx.days[k]; // 지난 날은 지움
+  try { localStorage.setItem(WX_KEY, JSON.stringify(wx)); } catch (e) { /* 저장 못 해도 화면은 그대로 */ }
+}
+
+// WMO 날씨 코드 → [이 번호까지, 그림, 말]
+const WX_CODES = [[0, '☀️', '맑음'], [1, '🌤️', '대체로 맑음'], [2, '⛅', '구름 조금'], [3, '☁️', '흐림'], [48, '🌫️', '안개'],
+  [57, '🌦️', '약한 비'], [67, '🌧️', '비'], [77, '🌨️', '눈'], [82, '🌦️', '소나기'], [86, '🌨️', '눈'], [99, '⛈️', '뇌우']];
+const wxLook = (code) => WX_CODES.find(([max]) => code <= max) || WX_CODES[WX_CODES.length - 1];
+
+// 그날 머무는 도시 (이동하는 날은 도착 도시)
+function wxPlace(day) {
+  const city = dayCities(day).pop();
+  const g = city && wx.geo[city];
+  return g && g.lat != null ? { city, lat: g.lat, lng: g.lng } : null;
+}
+const wxKey = (p, date) => `${p.lat},${p.lng}|${date}`;
+// 참고용 날짜: 일주일 전보다 앞선 해의 같은 날 (2/29는 2/28)
+function wxRefDate(date) {
+  const limit = addDays(todayStr(), -7);
+  let y = Number(date.slice(0, 4)) - 1;
+  const md = date.slice(5) === '02-29' ? '02-28' : date.slice(5);
+  while (`${y}-${md}` > limit) y--;
+  return `${y}-${md}`;
+}
+
+// 같은 이름 도시가 여럿이면 여행 중앙에서 가까운 곳, 아니면 인구 많은 곳.
+// Open-Meteo 지명 검색은 한글 이름의 큰 도시를 놓치기도 해서(인천 → 전남의 작은 마을) 그럴 땐 Nominatim으로.
+const round2 = (n) => Math.round(n * 100) / 100;
+async function wxGeocode(city, center) {
+  const nearest = (list) => (center ? list.filter((x) => distKm(center, x) < FAR_KM).sort((a, b) => distKm(center, a) - distKm(center, b))[0] : null);
+  const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=10&language=ko`);
+  if (!r.ok) throw new Error('도시 검색 ' + r.status);
+  const list = ((await r.json()).results || []).map((x) => ({ lat: x.latitude, lng: x.longitude, pop: x.population || 0 }));
+  const hit = nearest(list) || list.sort((a, b) => b.pop - a.pop).find((x) => x.pop > 0);
+  const best = hit || (await (async () => { const n = await geocode(city, 5, center); return nearest(n) || n[0]; })());
+  return best ? { lat: round2(best.lat), lng: round2(best.lng) } : { lat: null };
+}
+// 일정 위치가 부족하면 이미 찾은 다른 도시들의 가운데를 기준으로
+function wxCenter(trip) {
+  const pts = trip.days.map(wxPlace).filter(Boolean);
+  if (tripCenter(trip) || !pts.length) return tripCenter(trip);
+  const mid = (arr) => { const a = [...arr].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
+  return { lat: mid(pts.map((p) => p.lat)), lng: mid(pts.map((p) => p.lng)) };
+}
+
+async function wxFetch(p, kind, dates) {
+  const fc = kind === 'fc';
+  const when = fc ? (s) => s : wxRefDate;
+  const url = fc ? 'https://api.open-meteo.com/v1/forecast' : 'https://archive-api.open-meteo.com/v1/archive';
+  const daily = 'weather_code,temperature_2m_max,temperature_2m_min' + (fc ? ',precipitation_probability_max' : '');
+  const r = await fetch(`${url}?latitude=${p.lat}&longitude=${p.lng}&daily=${daily}&timezone=auto&start_date=${when(dates[0])}&end_date=${when(dates[dates.length - 1])}`);
+  if (!r.ok) throw new Error('날씨 ' + r.status);
+  const d = (await r.json()).daily;
+  const out = {};
+  for (const date of dates) {
+    const i = d.time.indexOf(when(date));
+    if (i < 0 || d.temperature_2m_max[i] == null) continue;
+    out[wxKey(p, date)] = {
+      k: kind, hi: Math.round(d.temperature_2m_max[i]), lo: Math.round(d.temperature_2m_min[i]), code: d.weather_code[i],
+      pop: fc ? d.precipitation_probability_max[i] : null, ref: fc ? null : when(date).slice(0, 4), at: Date.now(),
+    };
+  }
+  return out;
+}
+
+// 화면을 그릴 때마다 부르지만, 필요한 것(새 도시, 3시간 지난 예보, 예보 범위에 들어온 날)만 받는다.
+let wxBusy = false, wxFailAt = 0;
+async function refreshWeather(trip) {
+  if (!trip || wxBusy || !navigator.onLine || Date.now() - wxFailAt < 5 * 60e3) return;
+  const today = todayStr();
+  const last = addDays(today, FORECAST_DAYS - 1);
+  const days = trip.days.filter((d) => d.date >= today);
+  wxBusy = true;
+  let changed = false;
+  try {
+    for (const d of days) {
+      const city = dayCities(d).pop();
+      if (city && !wx.geo[city]) { wx.geo[city] = await wxGeocode(city, wxCenter(trip)); changed = true; }
+    }
+    const groups = {}; // 위치·종류별로 모아 한 번에 받는다
+    for (const d of days) {
+      const p = wxPlace(d);
+      if (!p) continue;
+      const kind = d.date <= last ? 'fc' : 'past';
+      const c = wx.days[wxKey(p, d.date)];
+      if (c && (kind === 'past' ? c.k === 'past' : Date.now() - c.at < 3 * 3600e3)) continue; // 예보는 3시간마다
+      (groups[`${wxKey(p, '')}${kind}`] ||= { p, kind, dates: [] }).dates.push(d.date);
+    }
+    for (const g of Object.values(groups)) {
+      const got = await wxFetch(g.p, g.kind, g.dates);
+      // 예보 마지막 날은 비어 오기도 한다 → 지난해 값으로. 그래도 없으면 빈 칸으로 기억해 되풀이 요청을 막는다.
+      const miss = () => g.dates.filter((d) => !got[wxKey(g.p, d)]);
+      if (g.kind === 'fc' && miss().length) Object.assign(got, await wxFetch(g.p, 'past', miss()));
+      for (const d of miss()) got[wxKey(g.p, d)] = { k: g.kind, code: null, at: Date.now() };
+      Object.assign(wx.days, got);
+      changed = true;
+    }
+  } catch (e) {
+    console.warn('날씨 불러오기 실패', e);
+    wxFailAt = Date.now();
+  }
+  wxBusy = false;
+  if (changed) { saveWx(); render(); }
+}
+
+function wxHtml(day) {
+  if (day.date < todayStr()) return '';
+  const p = wxPlace(day);
+  const w = p && wx.days[wxKey(p, day.date)];
+  if (!w || w.code == null) return '';
+  const [, icon, text] = wxLook(w.code);
+  const where = dayCities(day).length > 1 ? `${esc(p.city)} ` : '';
+  if (w.k === 'fc') return `<div class="wx">${where}${icon} ${text} <b>${w.hi}°</b> / ${w.lo}°${w.pop ? ` · 비 ${w.pop}%` : ''}</div>`;
+  return `<div class="wx past">${where}${icon} ${text} ${w.hi}° / ${w.lo}° <span>· ${w.ref}년 같은 날 (참고)</span></div>`;
+}
+
 const isHHMM = (t) => /^\d{1,2}:\d{2}$/.test(t || '');
 const hhmm = (t) => t.padStart(5, '0');
 
@@ -473,6 +598,7 @@ function render() {
     centerActiveChip(stripLeft);
     mountMap(detailTrip(), currentDay());
   }
+  refreshWeather(detail ? detailTrip() : mainTab === 'home' ? autoTrip() : null);
 }
 
 // 고른 날짜 버튼을 날짜 줄 가운데로. scrollIntoView는 페이지 전체까지 움직여서 화면이 흔들리므로 줄만 움직인다.
@@ -633,6 +759,7 @@ function renderToday() {
     const spent = t.expenses.filter((e) => e.date === today).reduce((s, e) => s + toKRW(t, e), 0);
     html += `
       <div class="section-title"><h3>오늘 일정${day && day.city ? ' · ' + esc(day.city) : ''}</h3></div>
+      ${day ? wxHtml(day).replace('class="wx', 'class="card wx') : ''}
       <div class="card" style="padding:4px 14px"><ul class="today-list">${items}</ul></div>
       <div class="card row"><span>오늘 지출</span><span class="spacer"></span><b class="num">${won(spent)}</b>
         <button class="btn sm" data-act="goto-sub" data-v="budget" data-id="${t.id}">기록하기</button></div>`;
@@ -957,6 +1084,7 @@ function renderDays(trip) {
           <span class="spacer"></span>
           ${day.items.length ? `<span class="badge">${doneCnt}/${day.items.length} 완료</span>` : ''}
         </div>
+        ${wxHtml(day)}
         ${costSum ? `<div class="muted small">예상 경비 ${money(costSum, trip.currency)}</div>` : ''}
       </div>
       <ul class="timeline2">${items}</ul>

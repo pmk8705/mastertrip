@@ -139,6 +139,12 @@ main { max-width: 640px; margin: 0 auto; padding: 12px 16px; }
 
 .day-head h2 { margin: 0; font-size: 20px; }
 .day-head .city { color: var(--accent-ink); font-weight: 700; }
+/* 현지 날씨 (예보 / 지난해 같은 날 참고) */
+.wx { margin-top: 6px; font-size: 14px; }
+.wx b { font-size: 15px; }
+.wx.past { color: var(--muted); font-size: 13px; }
+.wx.past span { font-size: 12px; }
+.card.wx { margin-top: 0; padding: 10px 14px; }
 .badge {
   display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 99px;
   background: var(--accent-soft); color: var(--accent-ink); font-weight: 600;
