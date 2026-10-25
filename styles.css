@@ -720,3 +720,7 @@ body.viewer-open { overflow: hidden; }
 .city-pin.left b { left: auto; right: 30px; }
 .city-pin.below b { left: 50%; top: 30px; transform: translateX(-50%); }
 .mode-pin { display: grid !important; place-items: center; font-size: 15px; background: #fff; border-radius: 50%; box-shadow: 0 1px 4px rgba(0, 0, 0, .3); }
+
+/* 예약 탭: 비상 서류 */
+.vault { display: grid; gap: 6px; border-left: 4px solid var(--accent); }
+.vault .row { gap: 6px; }

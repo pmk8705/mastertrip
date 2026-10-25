@@ -2301,6 +2301,85 @@ function closeViewer() {
   return true;
 }
 
+/* ---------- 비상 서류 (여권 사본·보험·E-티켓) — 여행과 상관없이 하나, 예약 탭 맨 위 ---------- */
+// 파일은 바우처와 같은 IndexedDB(voucherDb), 목록은 state.vault.docs. 백업에는 들어가고 여행 보내기 파일에는 안 들어간다.
+// PIN은 남이 잠깐 볼 때 바로 안 보이게 하는 가림막일 뿐(저장된 파일은 암호화되지 않음). 진짜 보호는 폰 잠금.
+let vaultOpen = false; // 이번에 PIN을 맞혔는지 (앱이 뒤로 가면 다시 잠금)
+const vault = () => (state.vault = state.vault || { docs: [], pin: '' });
+async function pinHash(pin) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('mastertrip:' + pin));
+  return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+function vaultCard() {
+  const v = vault();
+  const n = v.docs.filter((d) => !d.from).length;
+  const lock = v.pin ? `<span class="muted small">${vaultOpen ? '🔓' : '🔒'}</span>` : '';
+  return `
+    <div class="card vault">
+      <div class="row"><b>🛂 비상 서류</b>${lock}<span class="spacer"></span>
+        ${n ? `<button class="btn sm primary" data-act="vault-view">보기 (${n})</button>` : ''}
+        <button class="btn sm" data-act="vault-edit">${n ? '관리' : '+ 넣기'}</button></div>
+      <div class="muted small">여권 사본·여행자 보험·E-티켓 · 인터넷 없이 열려요. 카드 분실 신고 번호는 아래 긴급 연락처에.</div>
+    </div>`;
+}
+// PIN이 있으면 먼저 물어본다
+function withVault(fn) {
+  const v = vault();
+  if (!v.pin || vaultOpen) return fn();
+  openModal({
+    title: '🔒 비상 서류',
+    fields: [{ name: 'pin', label: 'PIN 4자리', type: 'password', required: true }],
+    html: '',
+    saveLabel: '열기',
+    onSave: (d) => {
+      pinHash(d.pin).then((h) => {
+        if (h !== v.pin) { toast('PIN이 달라요'); return; }
+        vaultOpen = true;
+        modal.close();
+        render();
+        fn();
+      });
+      return false; // 맞는지 확인한 뒤 직접 닫는다
+    },
+  });
+  const pin = $('#modalBody input[name=pin]');
+  pin.inputMode = 'numeric';
+  pin.maxLength = 4;
+  $('#modalBody').insertAdjacentHTML('beforeend', '<button type="button" class="link-btn" id="pinForgot">PIN을 잊었어요</button>');
+  $('#pinForgot').onclick = () => {
+    if (!confirm('PIN 가림막만 없앨까요? 서류는 그대로 남아요.')) return;
+    v.pin = '';
+    save();
+    modal.close();
+    render();
+  };
+}
+function vaultForm() {
+  const v = vault();
+  openModal({
+    title: '🛂 비상 서류',
+    html: `<p class="small muted" style="margin-top:0">여권 사본(사진 면), 여행자 보험 증권, 항공 E-티켓 등. 모든 여행에서 같이 보여요.<br>
+      ⚠ 백업 파일에는 함께 들어가니 백업 파일을 남에게 보내지 마세요. '여행 보내기' 파일에는 들어가지 않아요.</p>`,
+    onSave: (d) => {
+      if (d.pin && !/^\d{4}$/.test(d.pin)) { toast('PIN은 숫자 4자리예요'); return false; }
+      const prev = v.docs;
+      v.docs = files.list();
+      files.commit(prev).catch(() => toast('서류 저장에 실패했어요'));
+      if (d.pin) pinHash(d.pin).then((h) => { v.pin = h; vaultOpen = true; save(); render(); toast('PIN 가림막을 정했어요'); });
+    },
+  });
+  const files = fileListEditor(v.docs, '서류 (사진·PDF)');
+  $('#modalBody').insertAdjacentHTML('beforeend', fieldHtml({
+    name: 'pin', type: 'password', label: v.pin ? 'PIN 바꾸기 (숫자 4자리, 비우면 그대로)' : 'PIN 가림막 (선택, 숫자 4자리)',
+    placeholder: v.pin ? '바꿀 때만 입력' : '안 쓰려면 비워 두세요',
+  }) + `<p class="small muted" style="margin:-4px 0 8px">PIN은 남이 잠깐 볼 때 바로 안 보이게 하는 가림막이에요. 진짜 보호는 폰 잠금이에요.</p>
+    ${v.pin ? '<button type="button" class="link-btn" id="pinOff">PIN 가림막 끄기</button>' : ''}`);
+  const pin = $('#modalBody input[name=pin]');
+  pin.inputMode = 'numeric';
+  pin.maxLength = 4;
+  if (v.pin) $('#pinOff').onclick = () => { v.pin = ''; save(); $('#pinOff').remove(); toast('PIN 가림막을 껐어요'); };
+}
+
 function renderBook(trip) {
   const list = [...trip.bookings].sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
   const missing = list.filter((b) => !b.code).length;
@@ -2325,7 +2404,7 @@ function renderBook(trip) {
       <a class="call-btn" href="tel:${esc(c.phone.replace(/[^+\d]/g, ''))}">전화</a>
     </div>`).join('');
 
-  return `
+  return `${vaultCard()}
     ${missing ? `<div class="notice">아직 예약번호를 입력하지 않은 항목이 ${missing}개 있어요. 예약하면 바로 입력해 두세요.</div>` : ''}
     <div class="card" style="padding:4px 14px">${rows || '<div class="empty-state">예약이 없어요</div>'}</div>
     <button class="add-btn" data-act="add-book">+ 예약 추가</button>
@@ -2334,39 +2413,13 @@ function renderBook(trip) {
     <button class="add-btn" data-act="add-contact">+ 연락처 추가</button>`;
 }
 
-function bookForm(trip, b) {
-  const isNew = !b;
-  b = b || { id: uid(), type: '숙소', title: '', date: '', code: '', memo: '', link: '' };
-  openModal({
-    title: isNew ? '예약 추가' : '예약 수정',
-    fields: [
-      { name: 'type', label: '종류', type: 'select', options: Object.keys(BOOK_TYPES), value: b.type },
-      { name: 'title', label: '이름', value: b.title, required: true },
-      { name: 'date', label: '날짜', type: 'date', value: b.date },
-      { name: 'code', label: '예약번호', value: b.code },
-      { name: 'link', label: '예약 페이지 링크', type: 'url', value: b.link, placeholder: 'https://' },
-      { name: 'memo', label: '메모 (주소, 체크인 시간, 좌석 등)', type: 'textarea', value: b.memo },
-    ],
-    onSave: (d) => {
-      Object.assign(b, d);
-      const gone = (b.vouchers || []).filter((v) => !vList.includes(v));
-      b.vouchers = vList;
-      if (isNew) trip.bookings.push(b);
-      const put = [...added].filter(([id]) => vList.some((v) => v.id === id)).map(([id, blob]) => voucherDb.set(id, blob));
-      Promise.all(put).then(() => deleteVouchers(gone)).catch(() => toast('바우처 저장에 실패했어요'));
-    },
-    onDelete: isNew ? null : () => {
-      deleteVouchers(b.vouchers);
-      trip.bookings = trip.bookings.filter((x) => x !== b);
-      for (const d of trip.days) for (const it of d.items) if (it.bookingId === b.id) it.bookingId = ''; // 일정 연결도 풀기
-    },
-  });
-
-  // 바우처: 저장을 눌러야 반영 (취소하면 그대로)
-  let vList = [...(b.vouchers || [])];
+// 모달 안 '사진·PDF 목록' 편집기 (바우처·비상 서류가 같이 씀). 저장을 눌러야 반영(취소하면 그대로):
+// list()가 새 목록, commit(옛 목록)이 새 파일을 IndexedDB에 넣고 뺀 파일을 지운다.
+function fileListEditor(initial, label) {
+  let vList = [...(initial || [])];
   const added = new Map(); // 새로 넣은 파일 id → Blob
   $('#modalBody').insertAdjacentHTML('beforeend', `
-    <div class="field"><span>바우처 · 티켓 (인터넷 없이 보기)</span>
+    <div class="field"><span>${label}</span>
       <div id="vList"></div>
       <label class="btn sm" style="margin-top:6px">+ 사진·PDF 추가<input type="file" id="vInput" accept="image/*,application/pdf" multiple hidden></label>
       <div class="muted small" style="margin-top:4px">PDF는 앞 ${PDF_PAGES}쪽을 사진으로 바꿔 함께 저장해요. QR 화면 스크린샷도 좋아요</div>
@@ -2391,6 +2444,8 @@ function bookForm(trip, b) {
     draw();
   };
   $('#vInput').onchange = async (ev) => {
+    // 처리하는 동안 저장을 잠근다 (끝나기 전에 저장하면 목록에만 있고 파일은 안 남던 문제)
+    $('#modalSave').disabled = true;
     for (const f of ev.target.files) {
       const blob = await voucherBlob(f).catch(() => null);
       if (!blob) { toast(`${f.name}: 사진이나 15MB 이하 PDF만 넣을 수 있어요`); continue; }
@@ -2400,6 +2455,7 @@ function bookForm(trip, b) {
       if (isPdf(v)) await addPdfPages(f, v);
     }
     ev.target.value = '';
+    $('#modalSave').disabled = false;
     draw();
   };
   // PDF 앞 3쪽을 사진으로 바꿔 함께 넣는다. 바꾸는 동안은 저장 버튼을 잠근다.
@@ -2419,10 +2475,46 @@ function bookForm(trip, b) {
     } catch (e) {
       console.warn('PDF 변환 실패', e);
       toast('PDF를 사진으로 바꾸지 못했어요. QR 화면 스크린샷을 넣어 주세요');
-    } finally {
-      $('#modalSave').disabled = false;
     }
   }
+  return {
+    list: () => [...vList],
+    commit: async (prev) => {
+      const gone = (prev || []).filter((v) => !vList.includes(v));
+      await Promise.all([...added].filter(([id]) => vList.some((v) => v.id === id)).map(([id, blob]) => voucherDb.set(id, blob)));
+      await deleteVouchers(gone);
+    },
+  };
+}
+
+function bookForm(trip, b) {
+  const isNew = !b;
+  b = b || { id: uid(), type: '숙소', title: '', date: '', code: '', memo: '', link: '' };
+  openModal({
+    title: isNew ? '예약 추가' : '예약 수정',
+    fields: [
+      { name: 'type', label: '종류', type: 'select', options: Object.keys(BOOK_TYPES), value: b.type },
+      { name: 'title', label: '이름', value: b.title, required: true },
+      { name: 'date', label: '날짜', type: 'date', value: b.date },
+      { name: 'code', label: '예약번호', value: b.code },
+      { name: 'link', label: '예약 페이지 링크', type: 'url', value: b.link, placeholder: 'https://' },
+      { name: 'memo', label: '메모 (주소, 체크인 시간, 좌석 등)', type: 'textarea', value: b.memo },
+    ],
+    onSave: (d) => {
+      Object.assign(b, d);
+      const prev = b.vouchers || [];
+      b.vouchers = files.list();
+      if (isNew) trip.bookings.push(b);
+      files.commit(prev).catch(() => toast('바우처 저장에 실패했어요'));
+    },
+    onDelete: isNew ? null : () => {
+      deleteVouchers(b.vouchers);
+      trip.bookings = trip.bookings.filter((x) => x !== b);
+      for (const d of trip.days) for (const it of d.items) if (it.bookingId === b.id) it.bookingId = ''; // 일정 연결도 풀기
+    },
+  });
+
+  const files = fileListEditor(b.vouchers, '바우처 · 티켓 (인터넷 없이 보기)');
 }
 
 function contactForm(trip, c) {
@@ -2744,6 +2836,8 @@ $('#view').addEventListener('click', (ev) => {
     case 'goto-sub': pickTrip(id); mainTab = 'trips'; remember('main', mainTab); setSub(el.dataset.v); window.scrollTo(0, 0); break;
     case 'export': exportData(); break;
     case 'import-file': importPicker.click(); break;
+    case 'vault-view': withVault(() => openVoucher({ title: '🛂 비상 서류', vouchers: vault().docs })); break;
+    case 'vault-edit': withVault(vaultForm); break;
     case 'day-note': noteForm(ft, el.dataset.date); break;
     case 'photo-add': photoTarget = { tripId: ft.id, date: el.dataset.date }; photoPicker.click(); break;
     case 'photo-view': openDayPhotos(ft, el.dataset.date); break;
@@ -2910,7 +3004,11 @@ window.addEventListener('online', () => { if (inDetail()) render(); refreshRates
 window.addEventListener('offline', () => { if (inDetail()) render(); });
 
 // 자정이 지나면 오늘 날짜/D-day 갱신 (환율도 날이 바뀌었으면 다시)
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { render(); refreshRates(); } });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { vaultOpen = false; return; } // 비상 서류는 앱이 뒤로 가면 다시 잠금
+  render();
+  refreshRates();
+});
 
 render();
 refreshRates();
