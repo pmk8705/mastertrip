@@ -2040,6 +2040,11 @@ function bookForm(trip, b) {
       <div class="v-row"><span class="grow">${isPdf(v) ? '📄' : '🖼️'} ${esc(v.name)}</span>
         <button type="button" class="btn sm ghost" data-v="${v.id}" aria-label="빼기">✕</button></div>`).join('')
       || '<div class="muted small">아직 없어요</div>';
+    // PDF만 있으면 안내: 앱 밖(PDF 앱)에서 열려 현장에서 느리거나 안 열릴 수 있다. 저장은 막지 않는다.
+    if (vList.some(isPdf) && !vList.some((v) => !isPdf(v))) {
+      $('#vList').insertAdjacentHTML('beforeend', `<div class="notice" style="margin:8px 0 4px">📄 PDF는 앱 안에서 바로 안 보이고 PDF 앱으로 열려요.
+        현장에서 바로 보이도록 <b>QR이 있는 화면을 스크린샷으로 찍어 사진으로도</b> 넣어 두세요.</div>`);
+    }
   };
   draw();
   $('#vList').onclick = (ev) => {
