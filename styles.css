@@ -664,3 +664,18 @@ body.viewer-open { overflow: hidden; }
 
 /* 내 여행: 받은 여행 열기 */
 .import-trip { display: block; text-align: center; margin: 8px 0 14px; }
+
+/* 기록 탭 */
+.rec-summary { text-align: center; padding: 16px 14px; }
+.rec-big { font-size: 20px; font-weight: 800; color: var(--accent-ink); }
+.rec-stats { display: flex; justify-content: center; gap: 18px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.rec-stats b { display: block; font-size: 17px; color: var(--text); }
+.rec-day { display: grid; gap: 10px; }
+.rec-done { display: flex; flex-wrap: wrap; gap: 6px; }
+.rec-chip { font-size: 13px; padding: 4px 9px; border-radius: 99px; background: var(--surface-2); }
+.rec-money { gap: 8px; }
+.rec-note {
+  font: inherit; text-align: left; cursor: pointer; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); font-style: italic;
+}
+.rec-note.empty { font-style: normal; color: var(--muted); border-style: dashed; }

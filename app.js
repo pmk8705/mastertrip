@@ -839,13 +839,50 @@ function renderToday() {
   return html;
 }
 
+/* ---------- 기록: 여행 요약 + 하루 카드 (지나간 날·오늘, 최근 날이 위) ---------- */
+// 자동으로 모으는 것(완료 체크한 일정, 그날 지출) + 직접 남기는 것(한 줄 평 day.note, 사진은 다음 단계)
 function renderRecords() {
+  const t = focusTrip();
+  if (!t) return renderNoTrip();
+  const today = todayStr();
+  const cities = new Set(flowSegments(t).filter((x) => x.city).map((x) => x.city));
+  const doneCnt = t.days.reduce((n, d) => n + d.items.filter((x) => x.done).length, 0);
+  const spent = t.expenses.reduce((s, e) => s + toKRW(t, e), 0);
+  const days = t.days.map((d, i) => [d, i]).filter(([d]) => d.date <= today).reverse();
+  return `${tripSwitchRow(t)}
+    <div class="card rec-summary">
+      <div class="rec-big">${t.days.length}일의 여정</div>
+      <div class="rec-stats">
+        <span><b>${cities.size}</b>도시</span><span><b>${doneCnt}</b>곳 다녀옴</span><span><b>${won(spent)}</b>지출</span>
+      </div>
+    </div>
+    ${days.map(([d, i]) => recordDay(t, d, i)).join('')
+      || `<div class="empty-state">여행이 시작되면 하루마다 기록 카드가 생겨요.<br>${fmtDate(t.start)}부터</div>`}`;
+}
+function recordDay(t, d, i) {
+  const done = d.items.filter((x) => x.done);
+  const exps = t.expenses.filter((e) => e.date === d.date);
+  const krw = exps.reduce((s, e) => s + toKRW(t, e), 0);
+  const local = t.currency === 'KRW' ? 0 : exps.filter((e) => e.currency === t.currency).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+  const chips = done.map((x) => `<span class="rec-chip">${(ITEM_CATS[x.cat] || ITEM_CATS['기타']).icon} ${esc(x.title)}</span>`).join('');
   return `
-    <div class="card" style="text-align:center;padding:28px 18px">
-      <div style="font-size:40px">📝</div>
-      <h3 style="margin:8px 0 6px">기록은 준비 중이에요</h3>
-      <p class="muted small" style="margin:0">여행 일기, 사진 모음, 다녀온 곳 지도 같은 기능이 들어올 자리예요.</p>
+    <div class="card rec-day">
+      <div class="row"><b>Day ${i + 1}</b><span class="muted small">${fmtDate(d.date)}</span><span class="spacer"></span>${d.city ? `<span class="badge">${esc(d.city)}</span>` : ''}</div>
+      <div class="rec-done">${chips || '<span class="muted small">완료 체크한 일정이 없어요</span>'}</div>
+      <div class="row rec-money"><span class="muted small">지출</span><span class="spacer"></span><b class="num">${won(krw)}</b>${local ? `<span class="muted small">${money(local, t.currency)}</span>` : ''}</div>
+      <button type="button" class="rec-note ${d.note ? '' : 'empty'}" data-act="day-note" data-date="${d.date}">${d.note ? `“${esc(d.note)}”` : '✎ 오늘의 한 줄 남기기'}</button>
     </div>`;
+}
+function noteForm(trip, date) {
+  const d = trip.days.find((x) => x.date === date);
+  openModal({
+    title: `${fmtDate(date)} 한 줄`,
+    fields: [{ name: 'note', label: '오늘의 한 줄 (100자까지)', type: 'textarea', value: d.note || '', placeholder: '예: 알함브라 야경이 꿈같았다' }],
+    onSave: (v) => { if (v.note) d.note = v.note.slice(0, 100); else delete d.note; },
+    onDelete: d.note ? () => { delete d.note; } : null,
+    deleteConfirm: '한 줄을 지울까요?',
+  });
+  $('#modalBody textarea').maxLength = 100;
 }
 
 function tripForm(trip) {
@@ -2439,6 +2476,7 @@ $('#view').addEventListener('click', (ev) => {
     case 'goto-sub': pickTrip(id); mainTab = 'trips'; remember('main', mainTab); setSub(el.dataset.v); window.scrollTo(0, 0); break;
     case 'export': exportData(); break;
     case 'import-file': importPicker.click(); break;
+    case 'day-note': noteForm(ft, el.dataset.date); break;
     case 'theme': setTheme(el.dataset.v); break;
     case 'reset': resetAll(); break;
     case 'open-trip': openTrip(id); break;
