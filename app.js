@@ -2449,7 +2449,7 @@ function planForm(trip) {
 }
 
 /* ============ 예약·서류 ============ */
-const BOOK_TYPES = { 항공: '✈️', 숙소: '🏨', 교통: '🚆', 관광: '🎟️', 식당: '🍽️', 보험: '🛡️', 기타: '📄' };
+const BOOK_TYPES = { 항공: '✈️', 숙소: '🏨', 교통: '🚆', 렌터카: '🚗', 관광: '🎟️', 식당: '🍽️', 보험: '🛡️', 기타: '📄' };
 
 /* ---------- 숙소·항공·교통 비교 (여러 예약 사이트, 국내/해외에 따라 다름) ---------- */
 // 2026-10-23 확인: 아고다는 도시 이름 검색 주소가 홈으로 돌아가서 아고다 도시 번호가 필요 (아고다 검색창 제안 목록에서 찾은 값).
@@ -2515,6 +2515,13 @@ const BOOK_SITES = {
       { name: '렌페 (스페인 철도)', desc: '스페인 기차 공식 예매', url: () => ['https://www.renfe.com/es/en', 'home'] },
       { name: 'Omio', desc: '유럽 기차·버스·배 비교', url: () => ['https://www.omio.co.kr/', 'home'] },
     ],
+    // 렌터카는 사이트마다 영업소 번호가 있어야 검색이 열려서 모두 첫 화면 (픽업·반납 날짜도 따로 고름)
+    렌터카: [
+      { name: '부킹닷컴 렌터카', desc: '숙소와 함께 예약 관리', url: () => ['https://www.booking.com/cars/index.ko.html', 'home'] },
+      { name: '디스커버카스', desc: '숨은 비용 없음 · 풀커버 보험 저렴', url: () => ['https://www.discovercars.com/ko', 'home'] },
+      { name: '식스트 (Sixt)', desc: '유럽 직영 · 현지 카운터에서 바로', url: () => ['https://www.sixt.co.kr/', 'home'] },
+      { name: '유롭카 (Europcar)', desc: '유럽 직영 · 현지 카운터에서 바로', url: () => ['https://www.europcar.com/', 'home'] },
+    ],
   },
   국내: {
     숙소: [
@@ -2540,12 +2547,18 @@ const BOOK_SITES = {
       { name: '고속버스 (코버스)', desc: '전국 고속버스 공식', url: () => ['https://www.kobus.co.kr/', 'home'] },
       { name: '시외버스 (티머니)', desc: '시외버스 통합 예매', url: () => ['https://txbus.t-money.co.kr/', 'home'] },
     ],
+    렌터카: [
+      { name: '카모아', desc: '제주 포함 전국 가격 비교', url: () => ['https://carmore.kr/', 'home'] },
+      { name: '롯데렌터카', desc: '대기업 직영 · 완전 자차', url: () => ['https://www.lotterentacar.net/', 'home'] },
+      { name: 'SK렌터카', desc: '대기업 직영 · 완전 자차', url: () => ['https://homepage.skcarrental.com/', 'home'] },
+      { name: '쏘카', desc: '시간 단위 · 비대면 카셰어링', url: () => ['https://www.socar.kr/', 'home'] },
+    ],
   },
 };
-const BOOK_WHAT = { 숙소: '숙소', 항공: '항공권', 교통: '기차·버스' };
+const BOOK_WHAT = { 숙소: '숙소', 항공: '항공권', 교통: '기차·버스', 렌터카: '렌터카' };
 const sitesFor = (trip, type) => (BOOK_SITES[trip.region === '국내' ? '국내' : '해외'] || {})[type];
 
-// 예약번호가 없는 숙소·항공·교통 예약 아래: 누르면 비교 사이트 목록(바텀 시트)
+// 예약번호가 없는 숙소·항공·교통·렌터카 예약 아래: 누르면 비교 사이트 목록(바텀 시트)
 function bookSearchLink(trip, b) {
   const sites = sitesFor(trip, b.type);
   if (!sites) return '';
