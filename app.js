@@ -1130,6 +1130,35 @@ function mountMap(trip, day) {
 }
 
 /* ============ 일정 (여행 상세) ============ */
+/* ---------- 전체 일정 흐름 (도시별 머무는 기간) ---------- */
+// 그날 머무는 도시(이동하는 날은 도착 도시)가 같은 날끼리 묶는다. 첫날·마지막 날의 출국·도착은 ✈️
+function flowSegments(trip) {
+  const segs = [];
+  trip.days.forEach((d, i) => {
+    const edge = (i === 0 || i === trip.days.length - 1) && /출국|도착|귀국/.test(d.city || '');
+    const city = edge ? '' : dayCities(d).pop() || '';
+    const last = segs[segs.length - 1];
+    if (last && !edge && !last.edge && last.city === city) last.dates.push(d.date);
+    else segs.push({ city, edge, dates: [d.date] });
+  });
+  return segs;
+}
+// 막대 하나 = 한 도시, 길이 = 머무는 날 수. 누르면 그 도시 첫날로 (고른 날이 이미 그 안이면 그대로)
+function flowHtml(trip) {
+  const segs = flowSegments(trip);
+  if (segs.length < 2) return '';
+  const cities = [...new Set(segs.filter((x) => x.city).map((x) => x.city))];
+  return `<div class="flow" aria-label="전체 일정 흐름">${segs.map((x) => {
+    const on = x.dates.includes(selectedDate);
+    const n = x.dates.length;
+    const name = x.edge ? '✈️' : x.city ? esc(x.city) : '미정';
+    const cls = x.edge ? 'edge' : x.city ? `c${cities.indexOf(x.city) % 6}` : 'none';
+    return `<button type="button" class="flow-seg ${cls}${on ? ' on' : ''}" style="flex:${x.edge ? '0 0 28px' : n}"
+      data-act="pick-day" data-date="${on ? selectedDate : x.dates[0]}" title="${name} ${n}일">
+      <b>${name}</b>${x.edge ? '' : `<span>${n}일</span>`}</button>`;
+  }).join('')}</div>`;
+}
+
 function renderDays(trip) {
   if (!trip.days.length) return '<div class="empty-state">날짜가 없어요. ✎ 버튼으로 기간을 확인하세요.</div>';
   const t = todayStr();
@@ -1158,6 +1187,7 @@ function renderDays(trip) {
   const hasLeg = day.items.some((it, i) => i && travelLeg(day.items[i - 1], it));
 
   return `
+    ${flowHtml(trip)}
     <div class="day-strip">${strip}</div>
     ${mapSection(trip, day)}
     <div class="card day-card" id="dayCard">

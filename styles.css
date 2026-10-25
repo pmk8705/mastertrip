@@ -17,6 +17,13 @@
   --radius: 14px;
   --shadow: 0 1px 2px rgba(60, 40, 20, .06), 0 2px 8px rgba(60, 40, 20, .05);
   --tabbar-h: 62px;
+  /* 도시 색 (흐름 막대) */
+  --seg0: #DCEBFA; --seg0-ink: #1E4E7A;
+  --seg1: #DDF0E0; --seg1-ink: #2F5D35;
+  --seg2: #E9E1F7; --seg2-ink: #4B3A78;
+  --seg3: #F5E9C9; --seg3-ink: #6B4E12;
+  --seg4: #F8DDE4; --seg4-ink: #7A2E44;
+  --seg5: #D5F0EE; --seg5-ink: #1F5E59;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -36,6 +43,12 @@
     --ok: #4ade80;
     --danger: #f87171;
     --shadow: none;
+    --seg0: #1d3247; --seg0-ink: #a9cdf2;
+    --seg1: #1f3824; --seg1-ink: #a6dcae;
+    --seg2: #2f2745; --seg2-ink: #cbbdf0;
+    --seg3: #3a301a; --seg3-ink: #ecd49a;
+    --seg4: #40222b; --seg4-ink: #f0b3c3;
+    --seg5: #173a37; --seg5-ink: #9fe0d9;
   }
 }
 
@@ -118,6 +131,23 @@ main { max-width: 640px; margin: 0 auto; padding: 12px 16px; }
 }
 
 /* 날짜 칩 */
+/* 전체 일정 흐름: 도시별 머무는 기간 막대 (색은 도시 순서대로 6가지) */
+.flow { display: flex; gap: 3px; margin: 2px 0 10px; }
+.flow-seg {
+  min-width: 0; border: 0; border-radius: 8px; padding: 6px 2px; font: inherit; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; line-height: 1.25;
+  background: var(--surface-2); color: var(--muted);
+}
+.flow-seg b { font-size: 11px; letter-spacing: -.2px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-seg span { font-size: 11px; opacity: .85; }
+.flow-seg.edge { justify-content: center; }
+.flow-seg.on { box-shadow: inset 0 0 0 2px var(--accent); }
+.flow-seg.c0 { background: var(--seg0); color: var(--seg0-ink); }
+.flow-seg.c1 { background: var(--seg1); color: var(--seg1-ink); }
+.flow-seg.c2 { background: var(--seg2); color: var(--seg2-ink); }
+.flow-seg.c3 { background: var(--seg3); color: var(--seg3-ink); }
+.flow-seg.c4 { background: var(--seg4); color: var(--seg4-ink); }
+.flow-seg.c5 { background: var(--seg5); color: var(--seg5-ink); }
 .day-strip {
   position: relative;
   display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 10px; margin: 0 -16px; padding-left: 16px; padding-right: 16px;
