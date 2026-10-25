@@ -613,11 +613,16 @@ body.viewer-open { overflow: hidden; }
 .viewer-pdf { display: block; padding: 18px; margin-bottom: 16px; border: 1px solid #ccc; border-radius: 12px; color: #111; text-decoration: none; font-weight: 700; }
 .viewer-pdf span { display: block; font-weight: 400; font-size: 13px; color: #666; margin-top: 4px; }
 .viewer-note { text-align: center; color: #666; font-size: 13px; }
-/* 예약 탭: 아고다·스카이스캐너 찾기 */
+/* 예약 탭: 숙소·항공·교통 비교하기 → 사이트 목록 */
 .book-search {
-  display: inline-block; margin-top: 6px; font-size: 13px; font-weight: 700; text-decoration: none;
-  padding: 5px 10px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-ink);
+  display: inline-block; margin-top: 6px; font-size: 13px; font-weight: 700; text-decoration: none; cursor: pointer;
+  padding: 5px 10px; border: 0; border-radius: 99px; background: var(--accent-soft); color: var(--accent-ink);
 }
+a.site-row { text-decoration: none; color: inherit; }
+.pick-row.site-row > .grow { font-size: 15px; } /* 첫 칸이 이모지가 아니라서 이모지 크기(22px) 규칙을 되돌림 */
+.site-row .fill { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 99px; white-space: nowrap; background: var(--surface-2); color: var(--muted); }
+.site-row .fill.full { background: var(--accent-soft); color: var(--accent-ink); }
+.site-row .go { font-size: 20px; color: var(--muted); }
 
 /* 장소 검색 */
 .search-row { display: flex; gap: 6px; }

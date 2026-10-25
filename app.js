@@ -2451,7 +2451,7 @@ function planForm(trip) {
 /* ============ 예약·서류 ============ */
 const BOOK_TYPES = { 항공: '✈️', 숙소: '🏨', 교통: '🚆', 관광: '🎟️', 식당: '🍽️', 보험: '🛡️', 기타: '📄' };
 
-/* ---------- 숙소·항공 찾기 (아고다 · 스카이스캐너) ---------- */
+/* ---------- 숙소·항공·교통 비교 (여러 예약 사이트, 국내/해외에 따라 다름) ---------- */
 // 2026-10-23 확인: 아고다는 도시 이름 검색 주소가 홈으로 돌아가서 아고다 도시 번호가 필요 (아고다 검색창 제안 목록에서 찾은 값).
 // 스카이스캐너는 /transport/flights/출발/도착/YYMMDD/ (공항 코드, 여러 공항 도시는 스카이스캐너 도시 코드).
 const AGODA_CITY = {
@@ -2467,25 +2467,109 @@ const AIRPORT = {
 // 글자 안에서 아는 도시 이름 찾기 (앞에 나온 것부터)
 const findCity = (text, table) => Object.keys(table).filter((k) => text.includes(k)).sort((a, b) => text.indexOf(a) - text.indexOf(b))[0];
 
+// 스카이스캐너 도시 코드(4글자) → 국제 도시 코드(IATA 3글자, 구글·네이버용)
+const IATA_CITY = { sela: 'SEL', pari: 'PAR', rome: 'ROM', lond: 'LON', tyoa: 'TYO', osaa: 'OSA' };
+const iata = (code) => IATA_CITY[code] || code.toUpperCase();
+
+// 예약 하나에서 검색에 쓸 값: 도시·출발/도착 공항·날짜·박수·인원
+function bookCtx(trip, b) {
+  const day = b.date && trip.days.find((d) => d.date === b.date);
+  const dayCity = day ? dayCities(day).slice(-1)[0] || '' : '';
+  const nights = Number((b.title.match(/(\d+)\s*박/) || [])[1]) || 1;
+  const [fromTxt, toTxt] = b.title.split(/→|->|~/);
+  const from = findCity(fromTxt || '', AIRPORT), to = findCity(toTxt || '', AIRPORT);
+  const cleaned = b.title.replace(/\(.*?\)|숙소|호텔|\d+\s*박/g, '').trim();
+  return {
+    city: findCity(b.title, AGODA_CITY) || findCity(dayCity, AGODA_CITY) || dayCity || cleaned,
+    from: from && AIRPORT[from], to: to && AIRPORT[to],
+    date: b.date || '', checkIn: b.date || '', checkOut: b.date ? addDays(b.date, nights) : '', nights,
+    people: trip.people || 2,
+  };
+}
+
+// 예약 비교 사이트 (2026-10-26 확인). url(c)은 [주소, 채움 정도] — 'full' = 도시·날짜·인원까지, 'city' = 도시만, 'home' = 첫 화면.
+// 날짜가 없거나 도시·공항을 모르면 첫 화면으로. 네이버 항공권은 브라우저 패널에서 막혀 폰에서 확인 필요.
+const enc = encodeURIComponent;
+const BOOK_SITES = {
+  해외: {
+    숙소: [
+      { name: '부킹닷컴', desc: '유럽 숙소가 가장 많아요', url: (c) => (c.city && c.checkIn
+        ? [`https://www.booking.com/searchresults.ko.html?ss=${enc(c.city)}&checkin=${c.checkIn}&checkout=${c.checkOut}&group_adults=${c.people}&no_rooms=1&group_children=0`, 'full']
+        : ['https://www.booking.com/index.ko.html', 'home']) },
+      { name: '아고다', desc: '특가 비교', url: (c) => (AGODA_CITY[c.city] && c.checkIn
+        ? [`https://www.agoda.com/ko-kr/search?city=${AGODA_CITY[c.city]}&checkIn=${c.checkIn}&checkOut=${c.checkOut}&rooms=1&adults=${c.people}&children=0`, 'full']
+        : ['https://www.agoda.com/ko-kr/', 'home']) }, // 아고다는 도시 번호가 있어야 검색이 열린다
+      { name: '에어비앤비', desc: '아파트·취사 가능한 집', url: (c) => (c.city
+        ? [`https://www.airbnb.co.kr/s/${enc(c.city)}/homes?${c.checkIn ? `checkin=${c.checkIn}&checkout=${c.checkOut}&` : ''}adults=${c.people}`, c.checkIn ? 'full' : 'city']
+        : ['https://www.airbnb.co.kr/', 'home']) },
+    ],
+    항공: [
+      { name: '스카이스캐너', desc: '항공권 최저가 비교', url: (c) => (c.from && c.to && c.date
+        ? [`https://www.skyscanner.co.kr/transport/flights/${c.from}/${c.to}/${c.date.slice(2).replace(/-/g, '')}/?adultsv2=${c.people}&cabinclass=economy&rtn=0`, 'full']
+        : ['https://www.skyscanner.co.kr/', 'home']) },
+      { name: '구글 항공편', desc: '날짜별 가격 추이', url: (c) => (c.from && c.to && c.date
+        ? [`https://www.google.com/travel/flights?q=${enc(`Flights from ${iata(c.from)} to ${iata(c.to)} on ${c.date} one way ${c.people} adults`)}&hl=ko&curr=KRW`, 'full']
+        : ['https://www.google.com/travel/flights?hl=ko', 'home']) },
+    ],
+    교통: [
+      { name: '렌페 (스페인 철도)', desc: '스페인 기차 공식 예매', url: () => ['https://www.renfe.com/es/en', 'home'] },
+      { name: 'Omio', desc: '유럽 기차·버스·배 비교', url: () => ['https://www.omio.co.kr/', 'home'] },
+    ],
+  },
+  국내: {
+    숙소: [
+      { name: '네이버 숙소', desc: '실제 방문자 리뷰', url: (c) => (c.city
+        ? [`https://m.search.naver.com/search.naver?query=${enc(c.city + ' 숙소')}`, 'city']
+        : ['https://m.search.naver.com/search.naver?query=' + enc('숙소'), 'home']) },
+      { name: '여기어때', desc: '쿠폰·특가', url: (c) => (c.city
+        ? [`https://www.yeogi.com/domestic-accommodations?keyword=${enc(c.city)}${c.checkIn ? `&checkIn=${c.checkIn}&checkOut=${c.checkOut}` : ''}&personal=${c.people}`, c.checkIn ? 'full' : 'city']
+        : ['https://www.yeogi.com/', 'home']) },
+      { name: '야놀자', desc: '넓은 국내 숙소', url: (c) => (c.city
+        ? [`https://nol.yanolja.com/discovery/list/search?q=${enc(c.city)}${c.checkIn ? `&checkInDate=${c.checkIn}&checkOutDate=${c.checkOut}` : ''}&adultPax=${c.people}`, c.checkIn ? 'full' : 'city']
+        : ['https://nol.yanolja.com/', 'home']) },
+    ],
+    항공: [
+      { name: '네이버 항공권', desc: '국내선 특가·카드 할인', url: (c) => (c.from && c.to && c.date
+        ? [`https://flight.naver.com/flights/domestic/${iata(c.from)}-${iata(c.to)}-${c.date.replace(/-/g, '')}?adult=${c.people}&fareType=YC`, 'full']
+        : ['https://flight.naver.com/', 'home']) },
+      { name: '스카이스캐너', desc: '저가항공 비교', url: (c) => BOOK_SITES.해외.항공[0].url(c) },
+    ],
+    교통: [
+      { name: '코레일 (KTX)', desc: '기차 공식 예매', url: () => ['https://www.korail.com/', 'home'] },
+      { name: 'SRT', desc: '수서 출발 고속철도', url: () => ['https://etk.srail.kr/', 'home'] },
+      { name: '고속버스 (코버스)', desc: '전국 고속버스 공식', url: () => ['https://www.kobus.co.kr/', 'home'] },
+      { name: '시외버스 (티머니)', desc: '시외버스 통합 예매', url: () => ['https://txbus.t-money.co.kr/', 'home'] },
+    ],
+  },
+};
+const BOOK_WHAT = { 숙소: '숙소', 항공: '항공권', 교통: '기차·버스' };
+const sitesFor = (trip, type) => (BOOK_SITES[trip.region === '국내' ? '국내' : '해외'] || {})[type];
+
+// 예약번호가 없는 숙소·항공·교통 예약 아래: 누르면 비교 사이트 목록(바텀 시트)
 function bookSearchLink(trip, b) {
-  if (!b.date) return '';
-  const a = (url, label) => `<a class="book-search" href="${url}" target="_blank" rel="noopener" data-act="link">${label}</a>`;
-  if (b.type === '숙소') {
-    // 도시: 예약 이름 → 없으면 그날 도시 칸(“A → B”면 도착 도시)
-    const day = trip.days.find((d) => d.date === b.date);
-    const city = findCity(b.title, AGODA_CITY) || (day && findCity(dayCities(day).slice(-1)[0] || '', AGODA_CITY));
-    const nights = Number((b.title.match(/(\d+)\s*박/) || [])[1]) || 1;
-    if (!city) return a('https://www.agoda.com/ko-kr/', '🏨 아고다에서 숙소 찾기 ›');
-    const q = `city=${AGODA_CITY[city]}&checkIn=${b.date}&checkOut=${addDays(b.date, nights)}&rooms=1&adults=${trip.people || 2}&children=0`;
-    return a(`https://www.agoda.com/ko-kr/search?${q}`, `🏨 아고다에서 ${esc(city)} ${nights}박 찾기 ›`);
-  }
-  if (b.type === '항공') {
-    const [from, to] = b.title.split(/→|->|~/).map((x) => findCity(x || '', AIRPORT));
-    if (!from || !to) return a('https://www.skyscanner.co.kr/', '✈️ 스카이스캐너에서 찾기 ›');
-    const yymmdd = b.date.slice(2).replace(/-/g, '');
-    return a(`https://www.skyscanner.co.kr/transport/flights/${AIRPORT[from]}/${AIRPORT[to]}/${yymmdd}/?adultsv2=${trip.people || 2}&cabinclass=economy&rtn=0`, `✈️ 스카이스캐너에서 항공권 찾기 ›`);
-  }
-  return '';
+  const sites = sitesFor(trip, b.type);
+  if (!sites) return '';
+  return `<button type="button" class="book-search" data-act="book-compare" data-id="${b.id}">${BOOK_TYPES[b.type]} ${BOOK_WHAT[b.type]} 비교하기 (${sites.length}곳) ›</button>`;
+}
+
+function bookCompare(trip, b) {
+  const c = bookCtx(trip, b);
+  const FILL = { full: '날짜·인원 채워짐', city: '도시만 채워짐', home: '첫 화면' };
+  const when = c.date ? (b.type === '숙소' ? `${fmtDate(c.checkIn)} · ${c.nights}박` : fmtDate(c.date)) : '날짜 없음';
+  const where = b.type === '숙소' ? c.city : b.type === '항공' && c.from && c.to ? `${iata(c.from)} → ${iata(c.to)}` : '';
+  const rows = sitesFor(trip, b.type).map((site) => {
+    const [href, fill] = site.url(c);
+    return `<a class="pick-row site-row" href="${esc(href)}" target="_blank" rel="noopener">
+      <span class="grow"><b>${esc(site.name)}</b><br><span class="muted small">${esc(site.desc)}</span></span>
+      <span class="fill ${fill}">${FILL[fill]}</span><span class="go">›</span>
+    </a>`;
+  }).join('');
+  openModal({
+    title: `${BOOK_TYPES[b.type]} ${BOOK_WHAT[b.type]} 비교하기`,
+    html: `<p class="muted small" style="margin:-4px 0 12px">${esc(b.title)}${where ? ` · ${esc(where)}` : ''} · ${when} · ${c.people}명</p>${rows}
+      <p class="muted small">사이트마다 가격·할인이 달라요. 예약하면 예약번호를 여기에 적어 두세요.</p>`,
+  });
+  $('#modalBody').onclick = (ev) => { if (ev.target.closest('a.site-row')) setTimeout(() => modal.close(), 300); };
 }
 
 /* ---------- 바우처 (티켓·QR 사진, PDF) ---------- */
@@ -3194,6 +3278,7 @@ $('#view').addEventListener('click', (ev) => {
     case 'add-exp': expForm(ft, null); break;
     case 'edit-exp': expForm(ft, ft.expenses.find((x) => x.id === id)); break;
     case 'add-book': bookForm(ft, null); break;
+    case 'book-compare': bookCompare(ft, ft.bookings.find((x) => x.id === id)); break;
     case 'edit-book': bookForm(ft, ft.bookings.find((x) => x.id === id)); break;
     case 'open-book': { const t = detailTrip(); bookForm(t, t.bookings.find((x) => x.id === id)); break; } // 일정 카드의 예약번호
     case 'voucher': { const t = inDetail() ? detailTrip() : ft; openVoucher(t.bookings.find((x) => x.id === id)); break; }
