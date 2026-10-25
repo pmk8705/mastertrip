@@ -402,33 +402,39 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
 }
 
-/* ============ 여행 표지 사진 (IndexedDB) ============ */
-// 사진은 localStorage(약 5MB)에 넣기엔 커서 IndexedDB에 여행 id별로 Blob으로 저장한다.
-const media = (() => {
-  let dbp;
-  const open = () => dbp || (dbp = new Promise((res, rej) => {
-    const r = indexedDB.open('mastertrip-media', 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('covers');
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
-  }));
+/* ============ 여행 표지 사진 · 바우처 (IndexedDB) ============ */
+// 사진은 localStorage(약 5MB)에 넣기엔 커서 IndexedDB에 Blob으로 저장한다.
+// covers: 여행 id → 표지 사진 / vouchers: 바우처 id → 티켓 사진·PDF (목록은 booking.vouchers에)
+let mediaDb;
+const openMedia = () => mediaDb || (mediaDb = new Promise((res, rej) => {
+  const r = indexedDB.open('mastertrip-media', 2);
+  r.onupgradeneeded = () => {
+    for (const name of ['covers', 'vouchers']) if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name);
+  };
+  r.onsuccess = () => res(r.result);
+  r.onerror = () => rej(r.error);
+}));
+function mediaStore(name) {
   const run = async (mode, fn) => {
-    const db = await open();
+    const db = await openMedia();
     return new Promise((res, rej) => {
-      const tx = db.transaction('covers', mode);
-      const req = fn(tx.objectStore('covers'));
+      const tx = db.transaction(name, mode);
+      const req = fn(tx.objectStore(name));
       tx.oncomplete = () => res(req && req.result);
       tx.onerror = () => rej(tx.error);
     });
   };
   return {
+    get: (k) => run('readonly', (st) => st.get(k)),
     set: (k, v) => run('readwrite', (st) => st.put(v, k)),
     del: (k) => run('readwrite', (st) => st.delete(k)),
     clear: () => run('readwrite', (st) => st.clear()),
     keys: () => run('readonly', (st) => st.getAllKeys()),
     values: () => run('readonly', (st) => st.getAll()),
   };
-})();
+}
+const media = mediaStore('covers');
+const voucherDb = mediaStore('vouchers');
 const coverUrls = {}; // 여행 id → 화면에 쓸 사진 주소
 
 async function loadCovers() {
@@ -453,7 +459,7 @@ async function clearCovers() {
 }
 
 // 폰 사진(수 MB)을 긴 변 1200px JPEG로 줄인다
-async function shrinkImage(file, max = 1200) {
+async function shrinkImage(file, max = 1200, quality = 0.82) {
   const url = URL.createObjectURL(file);
   try {
     const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
@@ -462,7 +468,7 @@ async function shrinkImage(file, max = 1200) {
     c.width = Math.round(img.naturalWidth * scale);
     c.height = Math.round(img.naturalHeight * scale);
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    return await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.82));
+    return await new Promise((res) => c.toBlob(res, 'image/jpeg', quality));
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -604,6 +610,7 @@ function closeTrip() {
   else { openTripId = null; render(); }
 }
 window.addEventListener('popstate', (e) => {
+  closeViewer();
   openTripId = (e.state && e.state.trip) || null;
   selectedDate = null;
   render();
@@ -906,6 +913,7 @@ function tripForm(trip) {
     onDelete: isNew ? null : () => {
       state.trips = state.trips.filter((x) => x !== trip);
       removeCover(trip.id);
+      deleteVouchers(trip.bookings.flatMap((x) => x.vouchers || []));
       if (pickedTripId === trip.id) pickTrip(null);
       if (openTripId === trip.id) closeTrip();
     },
@@ -1358,7 +1366,7 @@ function ticketLinks(it) {
 function bookingChip(trip, it) {
   const b = it.bookingId && trip.bookings.find((x) => x.id === it.bookingId);
   if (!b) return '';
-  return `<button type="button" class="book-chip ${b.code ? '' : 'empty'}" data-act="open-book" data-id="${b.id}">📄 ${b.code ? '예약번호 ' + esc(b.code) : '예약번호 미입력'}</button>`;
+  return `<button type="button" class="book-chip ${b.code ? '' : 'empty'}" data-act="open-book" data-id="${b.id}">📄 ${b.code ? '예약번호 ' + esc(b.code) : '예약번호 미입력'}</button>${voucherBtn(b)}`;
 }
 
 // 예전 데이터: 같은 관광지·같은 날(또는 날짜 없는) 예약이 하나뿐이면 한 번만 자동 연결. 이후엔 사용자가 정한 대로.
@@ -1900,6 +1908,63 @@ function bookSearchLink(trip, b) {
   return '';
 }
 
+/* ---------- 바우처 (티켓·QR 사진, PDF) ---------- */
+// 예약마다 여러 장. 목록 {id, name, type}은 booking.vouchers, 파일은 IndexedDB vouchers → 인터넷 없이 열린다.
+const VOUCHER_MAX = 15 * 1024 * 1024;
+const isPdf = (v) => v.type === 'application/pdf';
+async function voucherBlob(file) {
+  if (file.type === 'application/pdf') return file.size > VOUCHER_MAX ? null : file;
+  if (!file.type.startsWith('image/')) return null;
+  return shrinkImage(file, 2400, 0.92); // QR이 뭉개지지 않게 크고 선명하게
+}
+async function deleteVouchers(list) {
+  for (const v of list || []) await voucherDb.del(v.id).catch(() => {});
+}
+const voucherBtn = (b) => (b && b.vouchers && b.vouchers.length
+  ? `<button type="button" class="book-chip voucher-btn" data-act="voucher" data-id="${b.id}">🎫 바우처 보기${b.vouchers.length > 1 ? ` (${b.vouchers.length})` : ''}</button>` : '');
+
+// 전체 화면 보기: 흰 배경, 보는 동안 화면이 꺼지지 않게(Wake Lock). 사진을 누르면 2배 확대. 뒤로가기로 닫힘.
+let viewerUrls = [];
+let wakeLock = null;
+async function openVoucher(b) {
+  if (!b || !(b.vouchers || []).length) return;
+  closeViewer();
+  const el = document.createElement('div');
+  el.id = 'viewer';
+  el.innerHTML = `<div class="viewer-bar"><b>${esc(b.title)}</b><span class="spacer"></span><button type="button" class="btn sm" data-close>닫기 ✕</button></div>
+    <div class="viewer-body"><p class="viewer-note">불러오는 중…</p></div>`;
+  document.body.append(el);
+  document.body.classList.add('viewer-open');
+  history.pushState({ ...(history.state || {}), viewer: 1 }, '');
+  el.onclick = (ev) => {
+    if (ev.target.closest('[data-close]')) return history.back();
+    const img = ev.target.closest('img');
+    if (img) img.classList.toggle('zoom');
+  };
+  try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { /* 지원 안 하면 그냥 */ }
+  const parts = [];
+  for (const v of b.vouchers) {
+    const blob = await voucherDb.get(v.id).catch(() => null);
+    if (!blob) { parts.push(`<p class="viewer-note">${esc(v.name)}: 이 폰에 파일이 없어요</p>`); continue; }
+    const url = URL.createObjectURL(blob);
+    viewerUrls.push(url);
+    parts.push(isPdf(v)
+      ? `<a class="viewer-pdf" href="${url}" download="${esc(v.name)}" target="_blank" rel="noopener">📄 ${esc(v.name)}<span>눌러서 PDF 앱으로 열기</span></a>`
+      : `<img src="${url}" alt="${esc(v.name)}">`);
+  }
+  if (el.isConnected) el.querySelector('.viewer-body').innerHTML = parts.join('') + '<p class="viewer-note">사진을 누르면 크게 · 화면 밝기를 올리면 QR이 잘 읽혀요</p>';
+}
+function closeViewer() {
+  const el = $('#viewer');
+  if (!el) return false;
+  el.remove();
+  document.body.classList.remove('viewer-open');
+  viewerUrls.forEach((u) => URL.revokeObjectURL(u));
+  viewerUrls = [];
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+  return true;
+}
+
 function renderBook(trip) {
   const list = [...trip.bookings].sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
   const missing = list.filter((b) => !b.code).length;
@@ -1911,6 +1976,7 @@ function renderBook(trip) {
         <div class="${b.code ? 'book-code' : 'book-code empty'}">${b.code ? esc(b.code) : '예약번호 미입력'}</div>
         ${b.memo ? `<div class="muted small" style="white-space:pre-wrap">${esc(b.memo)}</div>` : ''}
         ${b.link ? `<a class="small" href="${esc(b.link)}" target="_blank" rel="noopener" data-act="link">🔗 예약 페이지</a>` : ''}
+        ${voucherBtn(b)}
         ${b.code ? '' : bookSearchLink(trip, b)}
       </div>
     </div>`).join('');
@@ -1945,12 +2011,55 @@ function bookForm(trip, b) {
       { name: 'link', label: '예약 페이지 링크', type: 'url', value: b.link, placeholder: 'https://' },
       { name: 'memo', label: '메모 (주소, 체크인 시간, 좌석 등)', type: 'textarea', value: b.memo },
     ],
-    onSave: (d) => { Object.assign(b, d); if (isNew) trip.bookings.push(b); },
+    onSave: (d) => {
+      Object.assign(b, d);
+      const gone = (b.vouchers || []).filter((v) => !vList.includes(v));
+      b.vouchers = vList;
+      if (isNew) trip.bookings.push(b);
+      const put = [...added].filter(([id]) => vList.some((v) => v.id === id)).map(([id, blob]) => voucherDb.set(id, blob));
+      Promise.all(put).then(() => deleteVouchers(gone)).catch(() => toast('바우처 저장에 실패했어요'));
+    },
     onDelete: isNew ? null : () => {
+      deleteVouchers(b.vouchers);
       trip.bookings = trip.bookings.filter((x) => x !== b);
       for (const d of trip.days) for (const it of d.items) if (it.bookingId === b.id) it.bookingId = ''; // 일정 연결도 풀기
     },
   });
+
+  // 바우처: 저장을 눌러야 반영 (취소하면 그대로)
+  let vList = [...(b.vouchers || [])];
+  const added = new Map(); // 새로 넣은 파일 id → Blob
+  $('#modalBody').insertAdjacentHTML('beforeend', `
+    <div class="field"><span>바우처 · 티켓 (인터넷 없이 보기)</span>
+      <div id="vList"></div>
+      <label class="btn sm" style="margin-top:6px">+ 사진·PDF 추가<input type="file" id="vInput" accept="image/*,application/pdf" multiple hidden></label>
+      <div class="muted small" style="margin-top:4px">QR 화면은 스크린샷으로 넣는 게 가장 잘 보여요</div>
+    </div>`);
+  const draw = () => {
+    $('#vList').innerHTML = vList.map((v) => `
+      <div class="v-row"><span class="grow">${isPdf(v) ? '📄' : '🖼️'} ${esc(v.name)}</span>
+        <button type="button" class="btn sm ghost" data-v="${v.id}" aria-label="빼기">✕</button></div>`).join('')
+      || '<div class="muted small">아직 없어요</div>';
+  };
+  draw();
+  $('#vList').onclick = (ev) => {
+    const id = ev.target.closest('[data-v]')?.dataset.v;
+    if (!id) return;
+    vList = vList.filter((v) => v.id !== id);
+    added.delete(id);
+    draw();
+  };
+  $('#vInput').onchange = async (ev) => {
+    for (const f of ev.target.files) {
+      const blob = await voucherBlob(f).catch(() => null);
+      if (!blob) { toast(`${f.name}: 사진이나 15MB 이하 PDF만 넣을 수 있어요`); continue; }
+      const v = { id: 'v-' + uid(), name: f.name, type: blob.type || f.type };
+      added.set(v.id, blob);
+      vList.push(v);
+    }
+    ev.target.value = '';
+    draw();
+  };
 }
 
 function contactForm(trip, c) {
@@ -1991,16 +2100,22 @@ function resetAll() {
   if (!confirm('모든 여행과 수정 내용이 지워지고 처음 상태(스페인 여행 초안)로 돌아갑니다. 계속할까요?')) return;
   state = migrate(seedData()); pickTrip(null); openTripId = null; save(); render(); toast('초기화했어요'); // migrate: 분류 등 기본값 채우기
   clearCovers().then(render);
+  voucherDb.clear().catch(() => {});
 }
 
 async function exportData() {
-  // 백업 파일에는 표지 사진도 함께 넣는다 (dataURL)
-  const covers = {};
-  try {
-    const [keys, vals] = await Promise.all([media.keys(), media.values()]);
-    for (let i = 0; i < keys.length; i++) covers[keys[i]] = await blobToDataUrl(vals[i]);
-  } catch (e) { console.warn(e); }
-  const blob = new Blob([JSON.stringify({ ...state, covers }, null, 2)], { type: 'application/json' });
+  // 백업 파일에는 표지 사진·바우처도 함께 넣는다 (dataURL)
+  const dump = async (store) => {
+    const out = {};
+    try {
+      const [keys, vals] = await Promise.all([store.keys(), store.values()]);
+      for (let i = 0; i < keys.length; i++) out[keys[i]] = await blobToDataUrl(vals[i]);
+    } catch (e) { console.warn(e); }
+    return out;
+  };
+  const covers = await dump(media);
+  const vouchers = await dump(voucherDb);
+  const blob = new Blob([JSON.stringify({ ...state, covers, vouchers }, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `mastertrip-backup-${todayStr()}.json`;
@@ -2022,11 +2137,16 @@ function importData(ev) {
       if (!valid) throw new Error('형식 오류');
       if (!confirm('현재 데이터를 백업 파일 내용으로 바꿀까요?')) return;
       const covers = data.covers || {};
+      const vouchers = data.vouchers || {};
       delete data.covers;
+      delete data.vouchers;
       state = migrate(data); pickTrip(null); openTripId = null; save(); render(); toast('가져오기 완료');
       clearCovers()
         .then(() => Promise.all(Object.entries(covers).map(([id, url]) => fetch(url).then((r) => r.blob()).then((b) => setCover(id, b)))))
         .then(render);
+      voucherDb.clear()
+        .then(() => Promise.all(Object.entries(vouchers).map(([id, url]) => fetch(url).then((r) => r.blob()).then((b) => voucherDb.set(id, b)))))
+        .catch((e) => console.warn('바우처 복원 실패', e));
     } catch (e) {
       toast('올바른 백업 파일이 아니에요');
     }
@@ -2090,6 +2210,7 @@ $('#view').addEventListener('click', (ev) => {
     case 'add-book': bookForm(ft, null); break;
     case 'edit-book': bookForm(ft, ft.bookings.find((x) => x.id === id)); break;
     case 'open-book': { const t = detailTrip(); bookForm(t, t.bookings.find((x) => x.id === id)); break; } // 일정 카드의 예약번호
+    case 'voucher': { const t = inDetail() ? detailTrip() : ft; openVoucher(t.bookings.find((x) => x.id === id)); break; }
     case 'add-contact': contactForm(ft, null); break;
     case 'edit-contact': contactForm(ft, ft.contacts.find((x) => x.id === id)); break;
   }
