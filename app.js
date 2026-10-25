@@ -196,8 +196,9 @@ const COUNTRIES = [
   { name: '아랍에미리트', flag: '🇦🇪', cur: 'AED', unit: '디르함', sym: 'Dh', words: 'UAE 두바이 아부다비' }, // 아랍 글자 기호는 오른쪽→왼쪽이라 줄이 뒤섞여서 Dh
   { name: '멕시코', flag: '🇲🇽', cur: 'MXN', unit: '페소', sym: 'Mex$', words: '칸쿤' },
 ];
-// 통화 고르기 목록: 나라마다 한 줄 (유로 나라도 따로 — 나라 이름으로 찾기 쉽게). 값은 나라 이름, 저장은 통화
-const COUNTRY_OPTIONS = COUNTRIES.map((c) => ({ v: c.name, l: `${c.flag} ${c.name}, ${c.unit} (${c.cur}/${c.sym})` }));
+// 통화 고르기 목록: 나라마다 한 줄, 가나다순 (유로 나라도 따로 — 나라 이름으로 찾기 쉽게). 값은 나라 이름, 저장은 통화
+const COUNTRY_OPTIONS = [...COUNTRIES].sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+  .map((c) => ({ v: c.name, l: `${c.flag} ${c.name}, ${c.unit} (${c.cur}/${c.sym})` }));
 const curOf = (name) => (COUNTRIES.find((c) => c.name === name) || {}).cur || '';
 // 글에서 가장 먼저 나오는 나라·도시 (같은 자리면 긴 이름: '베니스'가 '니스'보다 먼저)
 function guessCountry(text) {
