@@ -661,3 +661,6 @@ body.viewer-open { overflow: hidden; }
 /* 설정: 화면 모드 */
 .seg-btns { display: flex; gap: 6px; }
 .seg-btns .btn { flex: 1; }
+
+/* 내 여행: 받은 여행 열기 */
+.import-trip { display: block; text-align: center; margin: 8px 0 14px; }

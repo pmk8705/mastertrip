@@ -794,6 +794,7 @@ function renderTripsList() {
     ${search}
     <div class="chips-row">${chips}</div>
     <button class="cta" data-act="new-trip">+ 새로운 여행 일정 만들기</button>
+    <label class="add-btn import-trip">📥 받은 여행 열기 (카톡으로 받은 파일)<input type="file" id="importTripInput" accept="application/pdf,.pdf,text/plain,.txt,application/json,.json" hidden></label>
     <div class="trip-list" id="tripList">${tripListHtml()}</div>`;
 }
 
@@ -940,7 +941,7 @@ function tripForm(trip) {
           <button type="button" class="btn" id="saveTripBtn">⬇ 파일로 저장</button>
         </div>
         <div class="muted small" style="margin-top:4px">일정·예약·바우처가 파일 하나로 가요. 공유로 파일이 안 가면 '파일로 저장' 후 카톡에서 + → 파일로 보내 주세요.
-          받는 사람은 설정 → 가져오기로 열면 이 여행만 추가돼요(이미 있으면 새 내용으로 바뀜).</div>
+          받는 사람은 내 여행 → '📥 받은 여행 열기'로 열면 이 여행만 추가돼요(이미 있으면 새 내용으로 바뀜).</div>
       </div>`);
     $('#shareTripBtn').onclick = () => shareTrip(trip);
     $('#saveTripBtn').onclick = () => shareTrip(trip, true);
@@ -2201,10 +2202,10 @@ function renderSettings() {
     </div>
     <div class="section-title"><h3>백업</h3></div>
     <div class="card">
-      <p class="small muted" style="margin-top:0">데이터는 이 폰 안에만 저장돼요. 폰을 바꾸거나 브라우저 데이터를 지우면 사라지니 가끔 내보내기로 백업하세요. 백업에는 모든 여행이 들어갑니다. 가져오기는 백업 파일과 받은 여행 파일(.mastertrip.txt)을 모두 열 수 있어요.</p>
+      <p class="small muted" style="margin-top:0">데이터는 이 폰 안에만 저장돼요. 폰을 바꾸거나 브라우저 데이터를 지우면 사라지니 가끔 내보내기로 백업하세요. 백업에는 모든 여행이 들어갑니다. 가져오기는 백업 파일과 받은 여행 파일(.mastertrip.pdf)을 모두 열 수 있어요.</p>
       <div class="row" style="flex-wrap:wrap">
         <button type="button" class="btn" data-act="export">⬇ 내보내기 (백업)</button>
-        <label class="btn" style="display:inline-block">⬆ 가져오기 <input type="file" id="importInput" accept="application/json,.json,text/plain,.txt" hidden></label>
+        <label class="btn" style="display:inline-block">⬆ 가져오기 <input type="file" id="importInput" accept="application/json,.json,text/plain,.txt,application/pdf,.pdf" hidden></label>
       </div>
     </div>
     <div class="section-title"><h3>데이터</h3></div>
@@ -2246,9 +2247,35 @@ async function exportData() {
 }
 
 /* ---------- 여행 하나 보내기 (배우자 폰으로) ---------- */
-// 여행 하나 + 표지 사진 + 바우처를 파일 하나로. 받은 쪽은 설정 → 가져오기로 열면 그 여행만 추가(같은 여행이면 교체).
-// 크롬 공유(Web Share)는 .json을 못 보내서 .txt로 만든다 (내용은 JSON).
+// 여행 하나 + 표지 사진 + 바우처를 파일 하나로. 받은 쪽은 '받은 여행 열기'(또는 설정 → 가져오기)로 열면 그 여행만 추가(같은 여행이면 교체).
+// 크롬 공유는 .json을 못 보내고, 카톡은 공유로 받은 .txt를 파일로 안 붙인다 → PDF로 만든다:
+// 열어 보면 안내 한 장, 데이터는 PDF 주석 줄(%MASTERTRIP-DATA:base64)에 담는다. 예전 .txt(JSON)도 가져올 수 있다.
 const TRIP_FILE = 'mastertrip-trip';
+const PDF_MARK = '%MASTERTRIP-DATA:';
+function tripPdf(b64) {
+  const text = [['MasterTrip trip file', 20, 780], ['Open this file in the MasterTrip app:', 12, 748], ['My Trips > Open received trip  (or Settings > Import)', 12, 728]]
+    .map(([t, size, y]) => `BT /F1 ${size} Tf 50 ${y} Td (${t.replace(/[()\\]/g, '\\$&')}) Tj ET`).join('\n');
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${text.length} >>\nstream\n${text}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  let out = `%PDF-1.4\n${PDF_MARK}${b64}\n`; // 데이터는 주석 줄 (PDF 보기 프로그램은 무시)
+  const offs = objs.map((o, i) => { const at = out.length; out += `${i + 1} 0 obj\n${o}\nendobj\n`; return at; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offs.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Blob([out], { type: 'application/pdf' });
+}
+// 받은 파일 글자 → 여행 데이터 (PDF면 주석 줄을 꺼내 base64 → UTF-8 JSON)
+async function readTripFileText(text) {
+  const i = text.indexOf(PDF_MARK);
+  if (i < 0) return JSON.parse(text);
+  const b64 = text.slice(i + PDF_MARK.length, text.indexOf('\n', i));
+  return JSON.parse(await (await fetch(`data:application/octet-stream;base64,${b64}`)).text());
+}
 async function tripFileBlob(trip) {
   const covers = {};
   const vouchers = {};
@@ -2261,17 +2288,18 @@ async function tripFileBlob(trip) {
     }
   } catch (e) { console.warn(e); }
   const data = { type: TRIP_FILE, v: 1, sentAt: new Date().toISOString(), trip, covers, vouchers };
-  return new Blob([JSON.stringify(data)], { type: 'text/plain' });
+  const b64 = (await blobToDataUrl(new Blob([JSON.stringify(data)]))).split(',')[1]; // UTF-8 → base64
+  return tripPdf(b64);
 }
 // asFile: 공유창 대신 바로 파일로 저장 (카톡에서 + → 파일로 첨부)
 async function shareTrip(trip, asFile) {
   toast('보낼 파일을 만드는 중…');
   const blob = await tripFileBlob(trip);
-  const name = `${trip.title.replace(/[\/:*?"<>|]/g, '').trim() || '여행'}.mastertrip.txt`;
-  const file = new File([blob], name, { type: 'text/plain' });
+  const name = `${trip.title.replace(/[\/:*?"<>|]/g, '').trim() || '여행'}.mastertrip.pdf`;
+  const file = new File([blob], name, { type: 'application/pdf' });
   if (!asFile && navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
-      // 파일만 보낸다: 글(text·title)을 같이 넣으면 카톡 등은 글만 받고 파일을 버린다
+      // 파일만 보낸다: 글(text·title)을 같이 넣으면 카톡 등은 글만 받고 파일을 버린다 (.txt는 아예 안 붙어서 PDF)
       await navigator.share({ files: [file] });
       return;
     } catch (e) {
@@ -2320,9 +2348,9 @@ function importData(ev) {
   const file = ev.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     try {
-      const data = JSON.parse(reader.result);
+      const data = await readTripFileText(reader.result);
       if (data.type === TRIP_FILE && data.trip) { importTrip(data); return; }
       const valid = Array.isArray(data.trips) || (data.trip && Array.isArray(data.days));
       if (!valid) throw new Error('형식 오류');
@@ -2417,7 +2445,7 @@ $('#view').addEventListener('input', (ev) => {
 
 $('#view').addEventListener('change', (ev) => {
   const el = ev.target;
-  if (el.id === 'importInput') return importData(ev);
+  if (el.id === 'importInput' || el.id === 'importTripInput') return importData(ev);
   if (el.dataset.act !== 'toggle-check') return;
   const c = focusTrip().checklist.find((x) => x.id === el.dataset.id);
   c.done = el.checked;
