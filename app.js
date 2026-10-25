@@ -882,6 +882,7 @@ function renderRecords() {
       <div class="rec-stats">
         <span><b>${cities.size}</b>도시</span><span><b>${doneCnt}</b>곳 다녀옴</span><span><b>${won(spent)}</b>지출</span>
       </div>
+      <button class="btn sm primary story-btn" data-act="story">📸 ${phaseOf(t) === 'soon' ? '곧 떠나요 카드 만들기' : '요약 이미지 만들기'} (9:16)</button>
     </div>
     ${footprintHtml(t)}
     ${days.map(([d, i]) => recordDay(t, d, i)).join('')
@@ -977,6 +978,163 @@ function mountFootprint(trip) {
     if (px < 110) continue;
     L.marker(m.pos, { icon: L.divIcon({ className: 'mode-pin', html: m.mode, iconSize: [26, 26], iconAnchor: [13, 13] }), interactive: false }).addTo(leafletMap);
   }
+}
+
+/* ---------- 기록: 9:16 요약 이미지 (인스타 스토리 크기 1080×1920, canvas에 직접 그림) ---------- */
+// 여행 전 = '곧 떠나요' 카드(D-day·경로·가 볼 곳), 여행 중·후 = 요약 카드(다녀온 곳·사진·분류별 지출).
+const STORY_W = 1080, STORY_H = 1920;
+const loadImg = (url) => new Promise((res) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = url; });
+function roundRect(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+// 사진을 칸에 꽉 차게 (가운데 잘라내기)
+function drawCover(g, img, x, y, w, h, r) {
+  g.save(); roundRect(g, x, y, w, h, r); g.clip();
+  const s = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+  const iw = img.naturalWidth * s, ih = img.naturalHeight * s;
+  g.drawImage(img, x + (w - iw) / 2, y + (h - ih) / 2, iw, ih);
+  g.restore();
+}
+// 한 줄에 안 들어가면 말줄임
+function fitText(g, text, maxW) {
+  if (g.measureText(text).width <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && g.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+  return t + '…';
+}
+async function drawStory(trip) {
+  const c = document.createElement('canvas');
+  c.width = STORY_W; c.height = STORY_H;
+  const g = c.getContext('2d');
+  const F = (w, size) => `${w} ${size}px "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif`;
+  const before = phaseOf(trip) === 'soon';
+  const cities = flowSegments(trip).filter((x) => x.city).map((x) => x.city);
+  const done = trip.days.flatMap((d) => d.items.filter((x) => x.done));
+  // 관광·액티비티 일정, 공식 예매처가 있는 유명 명소(알함브라 등)를 먼저
+  const sights = (before ? trip.days.flatMap((d) => d.items) : done).filter((x) => ['관광', '액티비티'].includes(x.cat))
+    .sort((a, b) => (sightsOf(b).length > 0) - (sightsOf(a).length > 0)).map((x) => x.title.replace(/\s*\(.*?\)\s*/g, ' ').trim());
+  const photos = trip.days.flatMap((d) => d.photos || []).filter((id) => photoUrls[id]);
+
+  // 배경: 노을 그라데이션
+  const bg = g.createLinearGradient(0, 0, 0, STORY_H);
+  bg.addColorStop(0, '#2B1B4A'); bg.addColorStop(0.45, '#B8326A'); bg.addColorStop(1, '#FF7A00');
+  g.fillStyle = bg; g.fillRect(0, 0, STORY_W, STORY_H);
+  g.fillStyle = '#fff'; g.textBaseline = 'alphabetic';
+
+  // 제목
+  g.font = F(600, 40); g.globalAlpha = 0.85;
+  g.fillText(before ? '곧 떠나요 ✈️' : '우리의 여행', 80, 150);
+  g.globalAlpha = 1; g.font = F(800, 84);
+  g.fillText(fitText(g, `${trip.emoji} ${trip.title}`, STORY_W - 160), 80, 250);
+  g.font = F(500, 40); g.globalAlpha = 0.9;
+  g.fillText(`${fmtRange(trip.start, trip.end)} · ${trip.days.length}일 · ${cities.length}개 도시`, 80, 315);
+  g.globalAlpha = 1;
+
+  // 사진: 기록 사진 3장 → 없으면 표지 사진 1장 → 없으면 큰 D-day/요일 글자
+  const top = 380, ph = 640;
+  const urls = photos.length ? photos.slice(0, 3).map((id) => photoUrls[id]) : coverUrls[trip.id] ? [coverUrls[trip.id]] : [];
+  const imgs = (await Promise.all(urls.map(loadImg))).filter(Boolean);
+  if (imgs.length >= 3) {
+    drawCover(g, imgs[0], 80, top, 920, 390, 36);
+    drawCover(g, imgs[1], 80, top + 410, 450, 230, 30);
+    drawCover(g, imgs[2], 550, top + 410, 450, 230, 30);
+  } else if (imgs.length) {
+    drawCover(g, imgs[0], 80, top, 920, ph, 36);
+  } else {
+    g.fillStyle = 'rgba(255,255,255,.12)'; roundRect(g, 80, top, 920, ph, 36); g.fill();
+    g.fillStyle = '#fff'; g.textAlign = 'center';
+    if (before) {
+      g.font = F(800, 220); g.fillText(`D-${diffDays(trip.start, todayStr())}`, STORY_W / 2, top + ph / 2 + 40);
+      g.font = F(500, 44); g.fillText(fmtDate(trip.start) + ' 출발', STORY_W / 2, top + ph / 2 + 130);
+    } else {
+      g.font = F(800, 300); g.fillText(trip.emoji, STORY_W / 2, top + ph / 2 + 100);
+    }
+    g.textAlign = 'left';
+  }
+  if (before && imgs.length) { // 사진 위에 D-day 딱지
+    g.fillStyle = '#FF7A00'; roundRect(g, 110, top + 30, 300, 110, 55); g.fill();
+    g.fillStyle = '#fff'; g.font = F(800, 64); g.textAlign = 'center';
+    g.fillText(`D-${diffDays(trip.start, todayStr())}`, 260, top + 108); g.textAlign = 'left';
+  }
+
+  // 경로: 도시를 점으로 잇기
+  let y = top + ph + 110;
+  g.font = F(700, 38); g.fillText('🗺 경로', 80, y);
+  y += 70;
+  g.font = F(600, 40);
+  const route = fitText(g, cities.join('  →  '), STORY_W - 160);
+  g.fillText(route, 80, y);
+
+  // 숫자 세 칸
+  y += 90;
+  const stats = before
+    ? [[`${trip.days.length}일`, '여정'], [`${cities.length}곳`, '도시'], [`${sights.length}곳`, '가 볼 곳']]
+    : [[`${done.length}곳`, '다녀온 곳'], [`${photos.length}장`, '사진'], [won(trip.expenses.reduce((s, e) => s + toKRW(trip, e), 0)), '지출']];
+  stats.forEach(([v, l], i) => {
+    const x = 80 + i * 313;
+    g.fillStyle = 'rgba(255,255,255,.16)'; roundRect(g, x, y, 290, 170, 28); g.fill();
+    g.fillStyle = '#fff'; g.textAlign = 'center';
+    g.font = F(800, v.length > 8 ? 44 : 60); g.fillText(v, x + 145, y + 92);
+    g.font = F(500, 32); g.globalAlpha = 0.85; g.fillText(l, x + 145, y + 140); g.globalAlpha = 1;
+    g.textAlign = 'left';
+  });
+  y += 240;
+
+  // 여행 전: 가 볼 곳 / 여행 후: 분류별 지출 막대 (없으면 다녀온 명소)
+  const byCat = CATS.map((k) => [k, trip.expenses.filter((e) => e.cat === k).reduce((s, e) => s + toKRW(trip, e), 0)]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  if (!before && byCat.length) {
+    g.font = F(700, 38); g.fillText('💶 어디에 썼나', 80, y); y += 40;
+    const max = byCat[0][1];
+    for (const [k, v] of byCat) {
+      g.font = F(500, 32); g.fillText(k, 80, y + 38);
+      g.fillStyle = 'rgba(255,255,255,.2)'; roundRect(g, 220, y + 12, 560, 34, 17); g.fill();
+      g.fillStyle = '#fff'; roundRect(g, 220, y + 12, Math.max(34, 560 * v / max), 34, 17); g.fill();
+      g.font = F(600, 30); g.textAlign = 'right'; g.fillText(won(v), 1000, y + 38); g.textAlign = 'left';
+      y += 62;
+    }
+  } else if (sights.length) {
+    g.font = F(700, 38); g.fillText(before ? '📍 가 볼 곳' : '📍 다녀온 곳', 80, y); y += 66;
+    // 두 줄까지: 들어가는 만큼 이어 붙이고 넘치면 다음 줄
+    g.font = F(500, 38);
+    const lines = [''];
+    for (const name of [...new Set(sights)].slice(0, 8)) {
+      const next = lines[lines.length - 1] ? `${lines[lines.length - 1]} · ${name}` : name;
+      if (g.measureText(next).width <= STORY_W - 160) lines[lines.length - 1] = next;
+      else if (lines.length < 2) lines.push(name);
+      else break;
+    }
+    lines.forEach((ln, k) => g.fillText(fitText(g, ln, STORY_W - 160), 80, y + k * 58));
+  }
+
+  // 아래 서명
+  g.font = F(700, 36); g.globalAlpha = 0.8; g.textAlign = 'center';
+  g.fillText('MasterTrip Planner', STORY_W / 2, STORY_H - 80);
+  g.globalAlpha = 1; g.textAlign = 'left';
+  return new Promise((res) => c.toBlob(res, 'image/png'));
+}
+// 미리보기 + 공유(인스타·카톡) / 저장
+async function openStory(trip) {
+  toast('이미지를 만드는 중…');
+  const blob = await drawStory(trip);
+  const url = URL.createObjectURL(blob);
+  const name = `${trip.title.replace(/[\\/:*?"<>|]/g, '').trim() || '여행'}-요약.png`;
+  const file = new File([blob], name, { type: 'image/png' });
+  const el = viewerShell(phaseOf(trip) === 'soon' ? '곧 떠나요 카드' : '여행 요약 카드', async (act) => {
+    if (act === 'share' && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); } catch (e) { /* 닫음 */ }
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    toast('사진을 저장했어요');
+  });
+  viewerUrls.push(url);
+  el.querySelector('.viewer-body').innerHTML = `<img src="${url}" alt="여행 요약 카드" class="story-img">
+    <div class="story-btns"><button type="button" class="btn primary" data-del="share">📤 공유 (인스타·카톡)</button>
+    <button type="button" class="btn" data-del="save">⬇ 저장</button></div>`;
 }
 
 function recordDay(t, d, i) {
@@ -2882,6 +3040,7 @@ $('#view').addEventListener('click', (ev) => {
     case 'vault-view': withVault(() => openVoucher({ title: '🛂 비상 서류', vouchers: vault().docs })); break;
     case 'vault-edit': withVault(vaultForm); break;
     case 'day-note': noteForm(ft, el.dataset.date); break;
+    case 'story': openStory(ft); break;
     case 'photo-add': photoTarget = { tripId: ft.id, date: el.dataset.date }; photoPicker.click(); break;
     case 'photo-view': openDayPhotos(ft, el.dataset.date); break;
     case 'theme': setTheme(el.dataset.v); break;

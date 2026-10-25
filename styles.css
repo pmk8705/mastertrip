@@ -724,3 +724,8 @@ body.viewer-open { overflow: hidden; }
 /* 예약 탭: 비상 서류 */
 .vault { display: grid; gap: 6px; border-left: 4px solid var(--accent); }
 .vault .row { gap: 6px; }
+
+/* 기록: 9:16 요약 이미지 */
+.story-btn { margin-top: 12px; }
+.viewer-body img.story-img { max-width: 420px; border-radius: 16px; border: 0; }
+.story-btns { display: flex; gap: 8px; justify-content: center; margin: 4px 0 16px; }
