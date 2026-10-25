@@ -161,6 +161,47 @@ function fmtRange(start, end) {
 }
 
 const CURRENCIES = ['EUR', 'USD', 'JPY', 'GBP', 'CNY', 'TWD', 'HKD', 'VND', 'THB', 'PHP', 'SGD', 'AUD', 'CAD', 'CHF', 'KRW'];
+
+// 한국인이 많이 가는 나라 20곳 (Gemini 정리 2026-10-25). 여행지 칸의 나라·도시 이름으로 통화를 골라 준다.
+// 통화마다 환율은 fetchRate가 받는다 (VND·TWD·MOP·MNT는 Frankfurter에 없어 open.er-api.com)
+const COUNTRIES = [
+  { name: '일본', flag: '🇯🇵', cur: 'JPY', unit: '엔', sym: '¥', words: '도쿄 오사카 교토 후쿠오카 삿포로 홋카이도 오키나와 나고야 고베 요코하마 유후인 벳푸 가고시마 시즈오카 하코네' },
+  { name: '베트남', flag: '🇻🇳', cur: 'VND', unit: '동', sym: '₫', words: '다낭 하노이 호치민 나트랑 냐짱 푸꾸옥 호이안 달랏 하롱 사파' },
+  { name: '태국', flag: '🇹🇭', cur: 'THB', unit: '바트', sym: '฿', words: '방콕 푸켓 치앙마이 파타야 코사무이 끄라비 후아힌' },
+  { name: '대만', flag: '🇹🇼', cur: 'TWD', unit: '대만 달러', sym: 'NT$', words: '타이베이 타이페이 가오슝 타이중 타이난 지우펀 화롄' },
+  { name: '필리핀', flag: '🇵🇭', cur: 'PHP', unit: '페소', sym: '₱', words: '세부 보라카이 마닐라 보홀 클락 팔라완' },
+  { name: '미국', flag: '🇺🇸', cur: 'USD', unit: '달러', sym: '$', words: '하와이 호놀룰루 괌 사이판 뉴욕 로스앤젤레스 라스베이거스 샌프란시스코 시애틀 마우이' },
+  { name: '중국', flag: '🇨🇳', cur: 'CNY', unit: '위안', sym: '¥', words: '상하이 베이징 북경 칭다오 장가계 청두 시안 하이난 하얼빈 백두산' },
+  { name: '홍콩', flag: '🇭🇰', cur: 'HKD', unit: '홍콩 달러', sym: 'HK$', words: '' },
+  { name: '마카오', flag: '🇲🇴', cur: 'MOP', unit: '파타카', sym: 'MOP$', words: '' },
+  { name: '싱가포르', flag: '🇸🇬', cur: 'SGD', unit: '싱가포르 달러', sym: 'S$', words: '센토사' },
+  { name: '말레이시아', flag: '🇲🇾', cur: 'MYR', unit: '링깃', sym: 'RM', words: '코타키나발루 쿠알라룸푸르 랑카위 페낭' },
+  { name: '인도네시아', flag: '🇮🇩', cur: 'IDR', unit: '루피아', sym: 'Rp', words: '발리 자카르타 롬복 우붓' },
+  { name: '호주', flag: '🇦🇺', cur: 'AUD', unit: '호주 달러', sym: 'A$', words: '시드니 멜버른 브리즈번 골드코스트 케언스 퍼스' },
+  { name: '프랑스', flag: '🇫🇷', cur: 'EUR', unit: '유로', sym: '€', words: '파리 니스 몽생미셸 리옹 마르세유' },
+  { name: '이탈리아', flag: '🇮🇹', cur: 'EUR', unit: '유로', sym: '€', words: '로마 피렌체 베네치아 베니스 밀라노 나폴리 아말피 돌로미티' },
+  { name: '스페인', flag: '🇪🇸', cur: 'EUR', unit: '유로', sym: '€', words: '바르셀로나 마드리드 세비야 그라나다 마요르카 말라가 론다' },
+  { name: '영국', flag: '🇬🇧', cur: 'GBP', unit: '파운드', sym: '£', words: '런던 에든버러 맨체스터 리버풀' },
+  { name: '체코', flag: '🇨🇿', cur: 'CZK', unit: '코루나', sym: 'Kč', words: '프라하 체스키크룸로프' },
+  { name: '스위스', flag: '🇨🇭', cur: 'CHF', unit: '프랑', sym: 'CHF', words: '취리히 인터라켄 제네바 루체른 체르마트 융프라우' },
+  { name: '몽골', flag: '🇲🇳', cur: 'MNT', unit: '투그릭', sym: '₮', words: '울란바토르 고비' },
+];
+// 통화 고르기 목록: 같은 통화(유로)는 한 줄로
+const CUR_OPTIONS = [...new Set(COUNTRIES.map((c) => c.cur))].map((cur) => {
+  const cs = COUNTRIES.filter((c) => c.cur === cur);
+  return { v: cur, l: `${cs.map((c) => c.flag).join('')} ${cs.map((c) => c.name).join('·')} — ${cs[0].unit} (${cur} ${cs[0].sym})` };
+});
+// 글에서 가장 먼저 나오는 나라·도시 (같은 자리면 긴 이름: '베니스'가 '니스'보다 먼저)
+function guessCountry(text) {
+  let best = null;
+  for (const c of COUNTRIES) {
+    for (const w of [c.name, ...c.words.split(' ').filter(Boolean)]) {
+      const i = text.indexOf(w);
+      if (i >= 0 && (!best || i < best.i || (i === best.i && w.length > best.w.length))) best = { i, w, c };
+    }
+  }
+  return best && best.c;
+}
 const SYMBOLS = { EUR: '€', USD: '$', JPY: '¥', GBP: '£', CNY: '¥' };
 function won(n) { return Math.round(n).toLocaleString('ko-KR') + '원'; }
 function money(n, cur) {
@@ -447,7 +488,9 @@ function fieldHtml(f) {
   const attrs = `name="${f.name}" ${f.required ? 'required' : ''} ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ''}`;
   let input;
   if (f.type === 'select') {
-    input = `<select ${attrs}>${f.options.map((o) => `<option ${o === f.value ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    input = `<select ${attrs}>${f.options.map((o) => (typeof o === 'object'
+      ? `<option value="${esc(o.v)}" ${o.v === f.value ? 'selected' : ''}>${esc(o.l)}</option>`
+      : `<option ${o === f.value ? 'selected' : ''}>${esc(o)}</option>`)).join('')}</select>`;
   } else if (f.type === 'textarea') {
     input = `<textarea ${attrs}>${v}</textarea>`;
   } else {
@@ -792,6 +835,9 @@ function tripForm(trip) {
   const isNew = !trip;
   const t = trip || { emoji: '✈️', title: '', places: '', start: '', end: '', region: '해외', currency: 'EUR', budget: { rate: '', rateAuto: true }, people: 2 };
   const autoRate = t.budget.rateAuto && t.region !== '국내';
+  const known = CUR_OPTIONS.some((o) => o.v === t.currency);
+  const curPicked = known ? t.currency : t.currency === 'KRW' ? 'EUR' : ''; // 목록에 없으면 '직접 입력'
+  const otherCur = known || t.currency === 'KRW' ? '' : t.currency;
   openModal({
     title: isNew ? '새 여행 만들기' : '여행 정보 수정',
     html: `<div class="field-row emoji-row">${fieldHtml({ name: 'emoji', label: '아이콘', value: t.emoji })}${fieldHtml({ name: 'title', label: '여행 이름', value: t.title, required: true, placeholder: '예: 제주도 힐링 여행' })}</div>`,
@@ -801,14 +847,16 @@ function tripForm(trip) {
       { name: 'end', label: '도착일 (돌아오는 날)', type: 'date', value: t.end, required: true },
       { name: 'people', label: '인원 (숙소·항공 찾기에 쓰여요)', type: 'number', value: t.people },
       { name: 'region', label: '지역', type: 'select', options: ['해외', '국내'], value: t.region },
-      { name: 'currency', label: '현지 통화 (해외)', value: t.currency, list: CURRENCIES, placeholder: '예: EUR, USD, JPY' },
+      { name: 'currency', label: '현지 통화 (해외) — 여행지를 쓰면 자동으로 골라요', type: 'select', value: curPicked,
+        options: [...CUR_OPTIONS, { v: '', l: '✏️ 목록에 없는 통화 (직접 입력)' }] },
+      { name: 'currencyOther', label: '통화 코드 (영문 3글자)', value: otherCur, list: CURRENCIES, placeholder: '예: CAD, NZD' },
       { name: 'rate', label: '환율: 현지 통화 1단위 = ?원 (비우면 자동)', type: 'number', value: autoRate || t.region === '국내' ? '' : t.budget.rate,
         placeholder: autoRate && t.budget.rate > 1 ? `자동 (지금 ${t.budget.rate}원)` : '자동' },
     ],
     onSave: (d) => {
       if (!d.start || !d.end || d.end < d.start) { toast('날짜를 확인하세요 (도착일이 출발일보다 빠름)'); return false; }
       if (diffDays(d.end, d.start) > 120) { toast('여행 기간은 120일까지 가능해요'); return false; }
-      let currency = (d.currency || '').toUpperCase();
+      let currency = (d.currency || d.currencyOther || '').toUpperCase();
       let rate = parseFloat(d.rate);
       let rateAuto = !d.rate; // 비우면 자동
       if (d.region === '국내' || currency === 'KRW') { currency = 'KRW'; rate = 1; rateAuto = true; }
@@ -865,6 +913,28 @@ function tripForm(trip) {
     const f = ev.target.files[0];
     if (f) $('#coverThumb').style.backgroundImage = `url('${URL.createObjectURL(f)}')`;
   };
+
+  // 통화: 여행지 칸에서 나라·도시를 찾으면 자동 선택 (직접 고른 뒤로는 그대로). 국내면 통화·환율 칸을 숨긴다.
+  const form = $('#modalForm');
+  const box = (name) => form.elements[name].closest('.field');
+  const sync = () => {
+    const dom = form.region.value === '국내';
+    box('currency').style.display = dom ? 'none' : '';
+    box('currencyOther').style.display = dom || form.currency.value ? 'none' : '';
+    box('rate').style.display = dom ? 'none' : '';
+  };
+  const curChanged = () => { if (form.currency.value !== t.currency) form.rate.value = ''; sync(); }; // 다른 통화의 환율은 자동으로
+  let touched = false;
+  form.currency.onchange = () => { touched = true; curChanged(); };
+  form.region.onchange = sync;
+  form.places.oninput = () => {
+    const c = guessCountry(form.places.value);
+    if (!c || touched || form.currency.value === c.cur) return;
+    form.currency.value = c.cur;
+    form.region.value = '해외';
+    curChanged();
+  };
+  sync();
 }
 
 // 여행 폼을 저장할 때 고른 사진을 줄여서 저장 (저장은 비동기라 끝나면 다시 그린다)
