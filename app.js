@@ -935,7 +935,7 @@ function mountFootprint(trip) {
   const cities = footCities(trip).filter((c) => c.lat != null);
   if (cities.length < 2) { ensureFootGeo(trip); return; }
   ensureFootGeo(trip); // 일부만 아는 경우 나머지도
-  // 페이지를 쓸어 내릴 때 지도가 손가락을 잡지 않게 끌기는 끄고, 두 손가락 확대·버튼만
+  // 전체가 보이는 처음 크기에서는 끌기를 꺼서 페이지가 넘어가게 하고, 확대하면 끌어서 움직일 수 있게 (zoomend에서 켜고 끔)
   leafletMap = L.map(el, { dragging: false, scrollWheelZoom: false, tap: false });
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(leafletMap);
   const bounds = [];
@@ -958,6 +958,12 @@ function mountFootprint(trip) {
   }
   // 도시 이름이 핀 오른쪽에 붙으니 오른쪽 여백을 넉넉히
   leafletMap.fitBounds(bounds, { paddingTopLeft: [30, 30], paddingBottomRight: [95, 30], maxZoom: 9 });
+  const map = leafletMap;
+  const baseZoom = map.getZoom();
+  map.on('zoomend', () => {
+    if (map.getZoom() > baseZoom) map.dragging.enable();
+    else { map.dragging.disable(); map.fitBounds(bounds, { paddingTopLeft: [30, 30], paddingBottomRight: [95, 30], maxZoom: 9, animate: false }); }
+  });
   // 도시 핀 + 이름. 오른쪽 가까이에 다른 도시가 있으면 이름을 왼쪽에 (겹치지 않게)
   const px = cities.map((c) => leafletMap.latLngToContainerPoint([c.lat, c.lng]));
   cities.forEach((c, i) => {
