@@ -870,7 +870,7 @@ function scrapForm(sc) {
   };
 }
 
-// 스크랩 → 고른 여행의 고른 날 맨 뒤에 (시간 미정). 사진은 스크랩과 함께 지운다.
+// 스크랩 → 고른 여행의 고른 날 맨 뒤에 (시간 미정). 사진·위치·메모는 일정으로 옮겨 간다.
 function scrapPlanForm(sc) {
   const trips = sortTrips(state.trips);
   if (!trips.length) return toast('먼저 여행을 만들어 주세요');
@@ -880,7 +880,7 @@ function scrapPlanForm(sc) {
     title: `“${sc.title}” 일정에 넣기`,
     html: `<label class="field"><span>여행</span><select name="trip" id="scrapTrip">${trips.map((t) => `<option value="${t.id}" ${t === first ? 'selected' : ''}>${esc(t.emoji)} ${esc(t.title)}</option>`).join('')}</select></label>
       <label class="field"><span>날짜</span><select name="date" id="scrapDay">${dayOpts(first)}</select></label>
-      <p class="muted small">그날 일정 맨 뒤에 ‘시간 미정’으로 들어가요. 넣은 뒤 스크랩 목록에서는 빠져요.</p>`,
+      <p class="muted small">그날 일정 맨 뒤에 ‘시간 미정’으로 들어가요. 사진·메모·위치도 함께 가고, 스크랩 목록에서는 빠져요.</p>`,
     saveLabel: '넣기',
     onSave: (d) => {
       const t = getTrip(d.trip);
@@ -888,9 +888,9 @@ function scrapPlanForm(sc) {
       if (!day) { toast('날짜를 골라 주세요'); return false; }
       const it = { id: uid(), time: '', dur: '', title: sc.title, place: hasPos(sc) ? '' : sc.title, memo: sc.memo || '', cat: guessCat(sc.title), cost: '', ticketUrl: '', bookingId: '', done: false };
       if (hasPos(sc)) Object.assign(it, { lat: sc.lat, lng: sc.lng });
+      if (sc.photo) it.photo = sc.photo; // 사진은 일정으로 옮겨 간다
       day.items.push(it);
       state.scraps = scraps().filter((x) => x !== sc);
-      if (sc.photo) deletePhotos([sc.photo]);
       toast(`${fmtDate(day.date)} 일정에 넣었어요`, { label: '보러 가기', run: () => { pickTrip(t.id); selectedDate = day.date; subTab = 'plan'; remember('sub', subTab); setMain('trips'); } });
     },
   });
@@ -1352,7 +1352,7 @@ function tripForm(trip) {
       state.trips = state.trips.filter((x) => x !== trip);
       removeCover(trip.id);
       deleteVouchers(trip.bookings.flatMap((x) => x.vouchers || []));
-      deletePhotos(trip.days.flatMap((d) => d.photos || []));
+      deletePhotos(trip.days.flatMap((d) => [...(d.photos || []), ...d.items.map((i) => i.photo).filter(Boolean)]));
       if (pickedTripId === trip.id) pickTrip(null);
     },
     deleteConfirm: `'${t.title}' 여행과 그 안의 일정·체크리스트·지출·예약이 모두 지워집니다. 삭제할까요?`,
@@ -2031,6 +2031,7 @@ function timelineItem(trip, it, i, clash) {
           <button class="tl2-check" data-act="toggle-item" data-id="${it.id}" aria-label="완료 표시">${it.done ? '✓' : ''}</button>
         </div>
         <div class="tl2-title">${esc(it.title)}</div>
+        ${it.photo && photoUrls[it.photo] ? `<button type="button" class="tl2-photo" data-act="item-photo" data-id="${it.id}" style="background-image:url('${photoUrls[it.photo]}')" aria-label="사진 크게 보기"></button>` : ''}
         ${it.memo ? `<div class="tl-memo">${esc(it.memo)}</div>` : ''}
         ${foot ? `<div class="tl2-foot">${foot}</div>` : ''}
       </div>
@@ -2110,6 +2111,13 @@ function itemForm(item) {
         <input name="dur" class="dur-input" value="${esc(item.dur)}" placeholder="직접 입력 (예: 40분)">
       </div>
       ${fieldHtml({ name: 'memo', label: '✏️ 메모 / 할 일', type: 'textarea', value: item.memo })}
+      <div class="field"><span>📷 사진 1장 (선택 — 스크랩 사진도 여기로 와요)</span>
+        <div class="cover-pick">
+          <span class="cover-thumb" id="itemThumb" style="${item.photo && photoUrls[item.photo] ? `background-image:url('${photoUrls[item.photo]}')` : ''}"></span>
+          <label class="btn sm">사진 고르기·찍기<input type="file" id="itemPhoto" accept="image/*" hidden></label>
+          ${item.photo && photoUrls[item.photo] ? '<label class="small"><input type="checkbox" id="itemPhotoDrop"> 사진 빼기</label>' : ''}
+        </div>
+      </div>
       <div class="field"><span>분류</span><div class="pick-wrap">${catChips}</div></div>
       ${fieldHtml({ name: 'cost', label: `💰 예상 경비 (${trip.currency})`, type: 'number', value: item.cost })}
       ${fieldHtml({ name: 'ticketUrl', label: '🎟 예매 링크 (있으면 카드 버튼이 이 링크를 열어요)', type: 'url', value: item.ticketUrl || '', placeholder: 'https://' })}
@@ -2135,9 +2143,22 @@ function itemForm(item) {
         toast(`${fmtDate(target.date)}로 옮겼어요`);
       }
       placeItem(target, item);
+      const file = $('#itemPhoto').files[0];
+      const old = item.photo;
+      if (file) {
+        const id = 'p-' + uid();
+        shrinkImage(file, 1600)
+          .then((blob) => photoDb.set(id, blob).then(() => { photoUrls[id] = URL.createObjectURL(blob); item.photo = id; save(); render(); }))
+          .then(() => old && deletePhotos([old]))
+          .catch(() => toast('사진을 넣지 못했어요'));
+      } else if (old && $('#itemPhotoDrop') && $('#itemPhotoDrop').checked) { delete item.photo; deletePhotos([old]); }
     },
-    onDelete: isNew ? null : () => { curDay.items = curDay.items.filter((x) => x !== item); },
+    onDelete: isNew ? null : () => { curDay.items = curDay.items.filter((x) => x !== item); if (item.photo) deletePhotos([item.photo]); },
   });
+  $('#itemPhoto').onchange = (ev) => {
+    const f = ev.target.files[0];
+    if (f) $('#itemThumb').style.backgroundImage = `url('${URL.createObjectURL(f)}')`;
+  };
   const checked = $('#modalBody input[name=date]:checked');
   if (checked) checked.parentElement.scrollIntoView({ inline: 'center', block: 'nearest' });
   wirePlaceSearch(trip, curDay);
@@ -3234,7 +3255,12 @@ async function readTripFileText(text) {
 async function tripFileBlob(trip) {
   const covers = {};
   const vouchers = {};
+  const photos = {}; // 일정 항목 사진 (스크랩해 둔 가게 사진 등)
   try {
+    for (const id of trip.days.flatMap((d) => d.items.map((i) => i.photo)).filter(Boolean)) {
+      const blob = await photoDb.get(id);
+      if (blob) photos[id] = await blobToDataUrl(blob);
+    }
     const c = await media.get(trip.id);
     if (c) covers[trip.id] = await blobToDataUrl(c);
     for (const v of trip.bookings.flatMap((b) => b.vouchers || [])) {
@@ -3244,7 +3270,7 @@ async function tripFileBlob(trip) {
   } catch (e) { console.warn(e); }
   // 기록 사진은 각자 폰의 것이라 보내지 않는다 (파일이 너무 커짐). 한 줄 평은 보냄
   const plain = { ...trip, days: trip.days.map(({ photos, ...d }) => d) };
-  const data = { type: TRIP_FILE, v: 1, sentAt: new Date().toISOString(), trip: plain, covers, vouchers };
+  const data = { type: TRIP_FILE, v: 1, sentAt: new Date().toISOString(), trip: plain, covers, vouchers, photos };
   const b64 = (await blobToDataUrl(new Blob([JSON.stringify(data)]))).split(',')[1]; // UTF-8 → base64
   return tripPdf(b64);
 }
@@ -3339,10 +3365,19 @@ async function importTrip(data) {
       if (nd && od.photos) nd.photos = od.photos;
       else if (od.photos) deletePhotos(od.photos);
     }
+    // 일정 사진: 새 파일에 없는 옛 사진만 지운다
+    const newItemPhotos = new Set(t.days.flatMap((d) => d.items.map((i) => i.photo)).filter(Boolean));
+    deletePhotos(old.days.flatMap((d) => d.items.map((i) => i.photo)).filter((id) => id && !newItemPhotos.has(id)));
     state.trips[state.trips.indexOf(old)] = t;
   } else state.trips.push(t);
   save();
   try {
+    for (const [id, url] of Object.entries(data.photos || {})) {
+      const blob = await restoreBlob(url);
+      await photoDb.set(id, blob);
+      if (photoUrls[id]) URL.revokeObjectURL(photoUrls[id]);
+      photoUrls[id] = URL.createObjectURL(blob);
+    }
     for (const [id, url] of Object.entries(data.vouchers || {})) await voucherDb.set(id, await restoreBlob(url));
     if (data.covers && data.covers[t.id]) await setCover(t.id, await restoreBlob(data.covers[t.id]));
   } catch (e) { console.warn('사진·바우처 복원 실패', e); }
@@ -3432,6 +3467,11 @@ $('#view').addEventListener('click', (ev) => {
     case 'vault-edit': withVault(vaultForm); break;
     case 'phrases': openPhrases(id ? getTrip(id) : ft); break;
     case 'scrap-add': scrapForm(null); break;
+    case 'item-photo': {
+      const it = day && day.items.find((x) => x.id === id);
+      if (it && photoUrls[it.photo]) viewerShell(it.title).querySelector('.viewer-body').innerHTML = `<img src="${photoUrls[it.photo]}" alt=""><p class="viewer-note">사진을 누르면 크게</p>`;
+      break;
+    }
     case 'scrap-edit': scrapForm(scraps().find((x) => x.id === id)); break;
     case 'scrap-plan': scrapPlanForm(scraps().find((x) => x.id === id)); break;
     case 'day-note': noteForm(ft, el.dataset.date); break;
