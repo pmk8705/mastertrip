@@ -110,6 +110,7 @@ function normalizeTrip(t) {
     if (t.end >= todayStr() && !t.checklist.some((c) => c.group === '출발 전 점검')) t.checklist.push(...preflightChecks(t.region));
     t.preflight = true;
   }
+  for (const c of t.checklist) if (PREFLIGHT_OLD[c.text]) c.text = PREFLIGHT_OLD[c.text]; // 지도 점검 문구 바뀜 (본 지도 저장)
   t.budget = t.budget || {};
   t.budget.rate = t.budget.rate || 1;
   if (t.budget.rateAuto == null) t.budget.rateAuto = true; // 환율 자동 (하루 한 번 갱신). 직접 입력하면 false
