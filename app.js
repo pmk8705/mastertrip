@@ -464,6 +464,7 @@ async function loadPhotos() {
   } catch (e) { console.warn('기록 사진 불러오기 실패', e); }
 }
 async function deletePhotos(ids) {
+  if (blobHold) return void blobHold.push(() => deletePhotos(ids));
   for (const id of ids || []) {
     await photoDb.del(id).catch(() => {});
     if (photoUrls[id]) { URL.revokeObjectURL(photoUrls[id]); delete photoUrls[id]; }
@@ -483,6 +484,7 @@ async function setCover(id, blob) {
   coverUrls[id] = URL.createObjectURL(blob);
 }
 async function removeCover(id) {
+  if (blobHold) return void blobHold.push(() => removeCover(id));
   await media.del(id);
   if (coverUrls[id]) URL.revokeObjectURL(coverUrls[id]);
   delete coverUrls[id];
@@ -519,7 +521,7 @@ if (navigator.storage && navigator.storage.persist) navigator.storage.persist().
 const modal = $('#modal');
 let modalHandlers = {};
 
-function openModal({ title, fields = [], html = '', onSave, onDelete, saveLabel = '저장', deleteConfirm = '삭제할까요?' }) {
+function openModal({ title, fields = [], html = '', onSave, onDelete, saveLabel = '저장', deleteConfirm = '' }) {
   $('#modalTitle').textContent = title;
   $('#modalBody').innerHTML = html + fields.map(fieldHtml).join('');
   $('#modalBody').onclick = null; // 여행 바꾸기 창이 단 클릭 처리를 다른 창에 남기지 않게
@@ -562,13 +564,39 @@ $('#modalForm').addEventListener('submit', (e) => {
   render();
 });
 $('#modalCancel').addEventListener('click', () => modal.close());
+// 지우기: 바로 지우고 아래 알림에 [되돌리기] (6초). 그동안 사진·PDF 파일은 실제로 지우지 않고 기다린다.
+// 여행 전체처럼 큰 것만 먼저 한 번 묻는다 (deleteConfirm).
+let blobHold = null; // 지우는 중에 불린 파일 지우기를 모아 둠
+let pendingDelete = null; // { held, timer }
+function commitDelete() {
+  const p = pendingDelete;
+  if (!p) return;
+  pendingDelete = null;
+  clearTimeout(p.timer);
+  p.held.forEach((run) => run());
+}
 $('#modalDelete').addEventListener('click', () => {
-  if (!confirm(modalHandlers.deleteConfirm)) return;
-  modalHandlers.onDelete();
+  if (modalHandlers.deleteConfirm && !confirm(modalHandlers.deleteConfirm)) return;
+  commitDelete(); // 앞에서 지운 것은 이제 확정
+  const snap = JSON.stringify(state);
+  const held = blobHold = [];
+  try { modalHandlers.onDelete(); } finally { blobHold = null; }
   modal.close();
   save();
   render();
-  toast('삭제했어요');
+  pendingDelete = { held, timer: setTimeout(commitDelete, 6000) };
+  toast('삭제했어요', {
+    label: '되돌리기',
+    run: () => {
+      if (!pendingDelete || pendingDelete.held !== held) return toast('이미 지워졌어요');
+      clearTimeout(pendingDelete.timer);
+      pendingDelete = null; // 모아 둔 파일 지우기는 버린다
+      state = migrate(JSON.parse(snap));
+      save();
+      render();
+      toast('되돌렸어요');
+    },
+  });
 });
 
 /* ============ 여행 선택 ============ */
@@ -843,7 +871,6 @@ function scrapForm(sc, shared) {
       toast(isNew ? '스크랩했어요' : '고쳤어요');
     },
     onDelete: isNew ? null : () => { state.scraps = scraps().filter((x) => x !== sc); if (sc.photo) deletePhotos([sc.photo]); },
-    deleteConfirm: `'${sc.title}' 스크랩을 지울까요?`,
   });
   const has = sc.photo && photoUrls[sc.photo];
   $('#modalBody').insertAdjacentHTML('beforeend', `
@@ -1308,7 +1335,6 @@ function noteForm(trip, date) {
     fields: [{ name: 'note', label: '오늘의 한 줄 (100자까지)', type: 'textarea', value: d.note || '', placeholder: '예: 알함브라 야경이 꿈같았다' }],
     onSave: (v) => { if (v.note) d.note = v.note.slice(0, 100); else delete d.note; },
     onDelete: d.note ? () => { delete d.note; } : null,
-    deleteConfirm: '한 줄을 지울까요?',
   });
   $('#modalBody textarea').maxLength = 100;
 }
@@ -2801,6 +2827,7 @@ async function pdfPages(file) {
   }
 }
 async function deleteVouchers(list) {
+  if (blobHold) return void blobHold.push(() => deleteVouchers(list));
   for (const v of list || []) await voucherDb.del(v.id).catch(() => {});
 }
 const voucherBtn = (b) => (b && b.vouchers && b.vouchers.length
@@ -3671,7 +3698,7 @@ window.addEventListener('offline', () => { if (inDetail()) render(); });
 
 // 자정이 지나면 오늘 날짜/D-day 갱신 (환율도 날이 바뀌었으면 다시)
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { vaultOpen = false; return; } // 비상 서류는 앱이 뒤로 가면 다시 잠금
+  if (document.hidden) { vaultOpen = false; commitDelete(); return; } // 비상 서류는 앱이 뒤로 가면 다시 잠금. 되돌리기 기다리던 삭제는 확정
   render();
   refreshRates();
 });
