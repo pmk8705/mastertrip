@@ -64,9 +64,10 @@ const ITEM_CATS = {
 // 분류가 없는 예전 일정은 제목으로 짐작한다 (나중에 바꿀 수 있음)
 function guessCat(title) {
   const rules = [
-    [/점심|저녁|아침|식사|타파스|디너|빠에야|레스토랑|맛집|해산물/, '식사'],
-    [/카페|커피|디저트/, '카페'],
-    [/쇼핑|시장|기념품|아울렛/, '쇼핑'],
+    // 영어·스페인어 이름도 (공유로 받은 가게 이름은 현지어인 경우가 많음)
+    [/점심|저녁|아침|식사|타파스|디너|빠에야|레스토랑|맛집|해산물|(?<![a-z])(bar|bodega|taberna|tapas|restaurante?|marisquer[ií]a|cervecer[ií]a|tasca|asador)(?![a-z])/i, '식사'],
+    [/카페|커피|디저트|(?<![a-z])(caf[eé]|coffee|cafeter[ií]a|churrer[ií]a|pasteler[ií]a|helader[ií]a|bakery)(?![a-z])/i, '카페'],
+    [/쇼핑|시장|기념품|아울렛|(?<![a-z])(mercado|market|shop|tienda|outlet)(?![a-z])/i, '쇼핑'],
     [/이동|공항|출국|도착|귀가|기차|버스|항공|트램|페리/, '이동'],
     [/체크인|체크아웃|숙소|호텔/, '숙소'],
     [/공연|플라멩코|해변|스파|투어|드라이브|일몰|전망대/, '액티비티'],
@@ -802,7 +803,7 @@ function scrapHtml() {
       <button type="button" class="scrap-thumb" data-act="scrap-edit" data-id="${sc.id}" style="${sc.photo && photoUrls[sc.photo] ? `background-image:url('${photoUrls[sc.photo]}')` : ''}" aria-label="스크랩 수정">${sc.photo && photoUrls[sc.photo] ? '' : '📌'}</button>
       <div class="grow" data-act="scrap-edit" data-id="${sc.id}">
         <b>${esc(sc.title)}</b>
-        <div class="muted small">${sc.memo ? esc(sc.memo) + ' · ' : ''}${hasPos(sc) ? '📍 위치 있음' : '위치 없음'}</div>
+        <div class="muted small">${sc.memo ? esc(sc.memo) + ' · ' : ''}${sc.url ? '🔗 · ' : ''}${hasPos(sc) ? '📍 위치 있음' : '위치 없음'}</div>
       </div>
       <button type="button" class="btn sm" data-act="scrap-plan" data-id="${sc.id}">일정에 넣기</button>
     </div>`).join('');
@@ -812,20 +813,23 @@ function scrapHtml() {
       : '<div class="muted small scrap-empty">길에서 본 가게, 인스타에서 본 카페… 사진 한 장과 이름만 먼저 남겨 두고 나중에 일정에 넣어요.</div>'}`;
 }
 
-function scrapForm(sc) {
+// shared: 폰 공유하기로 받은 값 {title, memo, url, pos} (readShared)
+function scrapForm(sc, shared) {
   const isNew = !sc;
-  sc = sc || { id: 'sc-' + uid(), title: '', memo: '', photo: '', at: todayStr() };
-  let pos = hasPos(sc) ? { lat: sc.lat, lng: sc.lng } : null;
+  sc = sc || { id: 'sc-' + uid(), title: '', memo: '', url: '', photo: '', at: todayStr() };
+  const init = shared || sc;
+  let pos = shared ? shared.pos : hasPos(sc) ? { lat: sc.lat, lng: sc.lng } : null;
   let file = null;
   let dropPhoto = false;
   openModal({
-    title: isNew ? '📌 빠른 스크랩' : '스크랩 수정',
+    title: shared ? '📌 공유받은 곳 스크랩' : isNew ? '📌 빠른 스크랩' : '스크랩 수정',
     fields: [
-      { name: 'title', label: '이름', value: sc.title, required: true, placeholder: '예: 골목 타파스 바' },
-      { name: 'memo', label: '메모 (선택)', value: sc.memo, placeholder: '예: 하몽 크로켓 맛있대' },
+      { name: 'title', label: '이름', value: init.title, required: true, placeholder: '예: 골목 타파스 바' },
+      { name: 'memo', label: '메모 (선택)', value: init.memo, placeholder: '예: 하몽 크로켓 맛있대' },
+      { name: 'url', label: '🔗 링크 (블로그·지도 등, 선택)', type: 'url', value: init.url || '', placeholder: 'https://' },
     ],
     onSave: (d) => {
-      Object.assign(sc, { title: d.title, memo: d.memo });
+      Object.assign(sc, { title: d.title, memo: d.memo, url: cleanUrl(d.url) });
       if (pos) Object.assign(sc, pos); else { delete sc.lat; delete sc.lng; }
       if (isNew) scraps().unshift(sc);
       const old = sc.photo;
@@ -876,6 +880,23 @@ function scrapForm(sc) {
   };
 }
 
+// 폰 '공유하기' → MasterTrip (manifest share_target): ./?title=&text=&url= 로 열린다.
+// 크롬은 보통 title=페이지 제목·url=주소, 구글 지도는 text="이름\n주소\nhttps://maps.app.goo.gl/…"처럼 한 덩어리로 보낸다.
+// 짧은 지도 링크는 위치를 못 풀어서(CORS) 긴 주소일 때만 위치를 채운다.
+function readShared() {
+  const q = new URLSearchParams(location.search);
+  if (!['title', 'text', 'url'].some((k) => q.get(k))) return null;
+  history.replaceState(history.state, '', location.pathname); // 다시 열어도 또 뜨지 않게 주소를 깨끗이
+  const title = (q.get('title') || '').trim();
+  const text = (q.get('text') || '').trim();
+  const all = `${q.get('url') || ''} ${text}`;
+  const url = (q.get('url') || (all.match(/https?:\/\/\S+/) || [])[0] || '').trim();
+  const lines = text.split(/\n+/).map((l) => l.replace(/https?:\/\/\S+/g, '').trim()).filter(Boolean);
+  const pos = posFromMapUrl(all);
+  const name = (title && !/^https?:/.test(title) ? title : lines.shift() || (pos && pos.name) || '').slice(0, 80);
+  return { title: name, memo: lines.filter((l) => l !== name).join(' · ').slice(0, 120), url, pos: pos ? { lat: pos.lat, lng: pos.lng } : null };
+}
+
 // 스크랩 → 고른 여행의 고른 날 맨 뒤에 (시간 미정). 사진·위치·메모는 일정으로 옮겨 간다.
 function scrapPlanForm(sc) {
   const trips = sortTrips(state.trips);
@@ -886,7 +907,7 @@ function scrapPlanForm(sc) {
     title: `“${sc.title}” 일정에 넣기`,
     html: `<label class="field"><span>여행</span><select name="trip" id="scrapTrip">${trips.map((t) => `<option value="${t.id}" ${t === first ? 'selected' : ''}>${esc(t.emoji)} ${esc(t.title)}</option>`).join('')}</select></label>
       <label class="field"><span>날짜</span><select name="date" id="scrapDay">${dayOpts(first)}</select></label>
-      <p class="muted small">그날 일정 맨 뒤에 ‘시간 미정’으로 들어가요. 사진·메모·위치도 함께 가고, 스크랩 목록에서는 빠져요.</p>`,
+      <p class="muted small">그날 일정 맨 뒤에 ‘시간 미정’으로 들어가요. 사진·메모·링크·위치도 함께 가고, 스크랩 목록에서는 빠져요.</p>`,
     saveLabel: '넣기',
     onSave: (d) => {
       const t = getTrip(d.trip);
@@ -895,6 +916,7 @@ function scrapPlanForm(sc) {
       const it = { id: uid(), time: '', dur: '', title: sc.title, place: hasPos(sc) ? '' : sc.title, memo: sc.memo || '', cat: guessCat(sc.title), cost: '', ticketUrl: '', bookingId: '', done: false };
       if (hasPos(sc)) Object.assign(it, { lat: sc.lat, lng: sc.lng });
       if (sc.photo) it.photo = sc.photo; // 사진은 일정으로 옮겨 간다
+      if (sc.url) it.link = sc.url; // 링크는 일정의 '참고 링크'로
       day.items.push(it);
       state.scraps = scraps().filter((x) => x !== sc);
       toast(`${fmtDate(day.date)} 일정에 넣었어요`, { label: '보러 가기', run: () => { pickTrip(t.id); selectedDate = day.date; subTab = 'plan'; remember('sub', subTab); setMain('trips'); } });
@@ -2023,7 +2045,9 @@ function timelineItem(trip, it, i, clash) {
   const when = [it.time, it.dur].filter(Boolean).join(' · ');
   const cost = Number(it.cost) || 0;
   const link = mapLink(trip, it);
-  const links = ticketLinks(it) + (link ? `<a class="map-btn" href="${link.url}"${link.app ? '' : ' target="_blank" rel="noopener"'} data-act="link">${link.label}</a>` : '');
+  const links = ticketLinks(it)
+    + (it.link ? `<a class="map-btn" href="${esc(it.link)}" target="_blank" rel="noopener" data-act="link">🔗 링크 ›</a>` : '')
+    + (link ? `<a class="map-btn" href="${link.url}"${link.app ? '' : ' target="_blank" rel="noopener"'} data-act="link">${link.label}</a>` : '');
   const foot = (it.place ? `<span class="tl2-place">${hasPos(it) ? '📍' : '◌'} ${esc(it.place)}</span>` : '')
     + (cost ? `<span class="tl2-cost">💰 ${money(cost, trip.currency)}</span>` : '')
     + bookingChip(trip, it)
@@ -2127,6 +2151,7 @@ function itemForm(item) {
       <div class="field"><span>분류</span><div class="pick-wrap">${catChips}</div></div>
       ${fieldHtml({ name: 'cost', label: `💰 예상 경비 (${trip.currency})`, type: 'number', value: item.cost })}
       ${fieldHtml({ name: 'ticketUrl', label: '🎟 예매 링크 (있으면 카드 버튼이 이 링크를 열어요)', type: 'url', value: item.ticketUrl || '', placeholder: 'https://' })}
+      ${fieldHtml({ name: 'link', label: '🔗 참고 링크 (블로그·지도·가게 페이지 등)', type: 'url', value: item.link || '', placeholder: 'https://' })}
       <label class="field"><span>📄 연결할 예약 (예약 탭)</span>
         <select name="bookingId">
           <option value="">연결 안 함</option>
@@ -2140,6 +2165,7 @@ function itemForm(item) {
         cat: d.cat || '기타', cost: cost > 0 ? cost : '',
         ticketUrl: cleanUrl(d.ticketUrl), bookingId: d.bookingId || '',
       });
+      if (d.link) item.link = cleanUrl(d.link); else delete item.link;
       if (d.lat !== '' && d.lng !== '') { item.lat = Number(d.lat); item.lng = Number(d.lng); delete item.geo; }
       else { delete item.lat; delete item.lng; delete item.geo; }
       const target = trip.days.find((x) => x.date === d.date) || curDay;
@@ -3653,6 +3679,8 @@ document.addEventListener('visibilitychange', () => {
 render();
 refreshRates();
 Promise.all([loadCovers(), loadPhotos()]).then(render);
+const sharedIn = readShared();
+if (sharedIn) setTimeout(() => scrapForm(null, sharedIn), 300);
 
 /* ============ 오프라인 (Service Worker) ============ */
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {

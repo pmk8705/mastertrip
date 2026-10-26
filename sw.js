@@ -1,6 +1,6 @@
 // 앱 파일을 폰에 저장해 두고 인터넷 없이도 열리게 한다.
 // 앱 파일을 수정해서 다시 배포할 때는 CACHE 이름의 숫자를 올린다.
-const CACHE = 'mastertrip-v57';
+const CACHE = 'mastertrip-v58';
 // 한 번 본 지도 그림(OpenStreetMap 타일)은 따로 저장해 두고 인터넷이 없을 때 보여 준다.
 // OSM 이용 규칙상 미리 대량으로 받아 두기는 금지 → 사용자가 실제로 본 것만, 최대 TILE_MAX장(한 장 7KB 안팎).
 // 앱 버전(CACHE)이 바뀌어도 지우지 않는다.
