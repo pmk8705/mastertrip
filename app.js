@@ -105,6 +105,11 @@ function normalizeTrip(t) {
     }
   }
   autoLinkBookings(t);
+  // '출발 전 점검' 묶음은 여행마다 한 번만 넣는다 (끝난 여행은 빼고, 지운 항목을 다시 넣지 않게 표시)
+  if (!t.preflight) {
+    if (t.end >= todayStr() && !t.checklist.some((c) => c.group === '출발 전 점검')) t.checklist.push(...preflightChecks(t.region));
+    t.preflight = true;
+  }
   t.budget = t.budget || {};
   t.budget.rate = t.budget.rate || 1;
   if (t.budget.rateAuto == null) t.budget.rateAuto = true; // 환율 자동 (하루 한 번 갱신). 직접 입력하면 false
@@ -2351,7 +2356,7 @@ function wirePlaceSearch(trip, day) {
 }
 
 /* ============ 체크리스트 ============ */
-const GROUP_ORDER = ['지금 바로', '3~4개월 전', '1개월 전', '1주 전', '전날', '짐 싸기'];
+const GROUP_ORDER = ['지금 바로', '3~4개월 전', '1개월 전', '1주 전', '출발 전 점검', '전날', '짐 싸기'];
 
 function groupsInUse(trip) {
   const extra = [...new Set(trip.checklist.map((c) => c.group))].filter((g) => !GROUP_ORDER.includes(g));

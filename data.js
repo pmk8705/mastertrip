@@ -171,6 +171,23 @@ function seedData() {
 }
 
 // 새 여행을 만들 때 기본으로 넣어 주는 체크리스트·연락처
+// '출발 전 점검': 인터넷이 없을 때도 앱이 제대로 되는지 출발 3~2일 전에 직접 확인 (비행기 모드로).
+// 기존 여행에는 normalizeTrip이 한 번만 넣는다 (trip.preflight 표시).
+function preflightChecks(region) {
+  const c = (text, due) => ({ id: uid(), group: '출발 전 점검', text, due, done: false });
+  const overseas = region === '해외';
+  return [
+    c('✈️ 비행기 모드로 켠 뒤 앱을 완전히 닫았다 다시 열기 → 일정이 그대로 보이는지', 3),
+    c('🎟 예약 탭 바우처(티켓·QR)가 비행기 모드에서 열리는지', 3),
+    c('🛂 비상 서류가 폰 잠금(지문)으로 열리는지', 3),
+    c(overseas ? '💶 비행기 모드에서 지출 하나 적어 보기 → 원화가 계산되는지 (확인 후 지우기)' : '💳 비행기 모드에서 지출 하나 적어 보기 (확인 후 지우기)', 3),
+    c(overseas ? '🗺 비행기 모드에서 일정의 지도 버튼이 “지도 앱으로 보기”로 바뀌어 열리는지 (구글 지도 오프라인 지도 받아 두기)'
+      : '🗺 비행기 모드에서 일정의 지도 버튼이 네이버 지도 앱으로 열리는지', 2),
+    ...(overseas ? [c('🗣 회화 카드가 비행기 모드에서 열리는지', 2)] : []),
+    c('📷 기록 탭에 사진·한 줄을 남겨 보고, 9:16 요약 카드가 저장되는지', 2),
+  ];
+}
+
 function newTripTemplate(region) {
   const c = (group, text, due = null) => ({ id: uid(), group, text, due, done: false });
   const overseas = region === '해외';
