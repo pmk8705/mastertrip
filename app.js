@@ -1023,7 +1023,7 @@ function mountFootprint(trip) {
   ensureFootGeo(trip); // 일부만 아는 경우 나머지도
   // 전체가 보이는 처음 크기에서는 끌기를 꺼서 페이지가 넘어가게 하고, 확대하면 끌어서 움직일 수 있게 (zoomend에서 켜고 끔)
   leafletMap = L.map(el, { dragging: false, scrollWheelZoom: false, tap: false });
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(leafletMap);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap', crossOrigin: true }).addTo(leafletMap);
   const bounds = [];
   const modes = []; // 지도 크기가 정해진 뒤 붙인다 (가까운 도시 사이엔 아이콘이 이름을 가려서 뺌)
   cities.forEach((c, i) => {
@@ -1700,7 +1700,7 @@ function mountMap(trip, day) {
   const el = $('#map');
   if (!el || !mapOpen || typeof L === 'undefined') return;
   leafletMap = L.map(el, { zoomControl: false });
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(leafletMap);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap', crossOrigin: true }).addTo(leafletMap);
   const pts = [];
   day.items.forEach((it, i) => {
     if (!hasPos(it)) return;
