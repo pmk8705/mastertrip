@@ -786,13 +786,133 @@ function renderNoTrip() {
   return `<div class="empty-state">아직 여행이 없어요.<br><br><button class="btn primary" data-act="new-trip">+ 새 여행 만들기</button></div>`;
 }
 
+/* ---------- 빠른 스크랩: 가 보고 싶은 곳을 사진 1장·이름·(현재 위치)로 바로 저장 → 나중에 일정에 넣기 ---------- */
+// state.scraps = [{id, title, memo, lat, lng, photo(사진 id, photoDb), at}]. 여행과 상관없이 하나의 목록.
+const scraps = () => (state.scraps = state.scraps || []);
+function scrapHtml() {
+  const list = scraps();
+  const rows = list.map((sc) => `
+    <div class="scrap-item">
+      <button type="button" class="scrap-thumb" data-act="scrap-edit" data-id="${sc.id}" style="${sc.photo && photoUrls[sc.photo] ? `background-image:url('${photoUrls[sc.photo]}')` : ''}" aria-label="스크랩 수정">${sc.photo && photoUrls[sc.photo] ? '' : '📌'}</button>
+      <div class="grow" data-act="scrap-edit" data-id="${sc.id}">
+        <b>${esc(sc.title)}</b>
+        <div class="muted small">${sc.memo ? esc(sc.memo) + ' · ' : ''}${hasPos(sc) ? '📍 위치 있음' : '위치 없음'}</div>
+      </div>
+      <button type="button" class="btn sm" data-act="scrap-plan" data-id="${sc.id}">일정에 넣기</button>
+    </div>`).join('');
+  return `<div class="section-title"><h3>📌 스크랩${list.length ? ` (${list.length})` : ''}</h3>
+      <button class="btn sm primary" data-act="scrap-add">+ 빠른 스크랩</button></div>
+    ${rows ? `<div class="card scrap-list">${rows}</div>`
+      : '<div class="muted small scrap-empty">길에서 본 가게, 인스타에서 본 카페… 사진 한 장과 이름만 먼저 남겨 두고 나중에 일정에 넣어요.</div>'}`;
+}
+
+function scrapForm(sc) {
+  const isNew = !sc;
+  sc = sc || { id: 'sc-' + uid(), title: '', memo: '', photo: '', at: todayStr() };
+  let pos = hasPos(sc) ? { lat: sc.lat, lng: sc.lng } : null;
+  let file = null;
+  let dropPhoto = false;
+  openModal({
+    title: isNew ? '📌 빠른 스크랩' : '스크랩 수정',
+    fields: [
+      { name: 'title', label: '이름', value: sc.title, required: true, placeholder: '예: 골목 타파스 바' },
+      { name: 'memo', label: '메모 (선택)', value: sc.memo, placeholder: '예: 하몽 크로켓 맛있대' },
+    ],
+    onSave: (d) => {
+      Object.assign(sc, { title: d.title, memo: d.memo });
+      if (pos) Object.assign(sc, pos); else { delete sc.lat; delete sc.lng; }
+      if (isNew) scraps().unshift(sc);
+      const old = sc.photo;
+      if (file) {
+        const id = 'p-' + uid();
+        shrinkImage(file, 1600)
+          .then((blob) => photoDb.set(id, blob).then(() => { photoUrls[id] = URL.createObjectURL(blob); sc.photo = id; save(); render(); }))
+          .then(() => old && deletePhotos([old]))
+          .catch(() => toast('사진을 넣지 못했어요'));
+      } else if (dropPhoto && old) { sc.photo = ''; deletePhotos([old]); }
+      toast(isNew ? '스크랩했어요' : '고쳤어요');
+    },
+    onDelete: isNew ? null : () => { state.scraps = scraps().filter((x) => x !== sc); if (sc.photo) deletePhotos([sc.photo]); },
+    deleteConfirm: `'${sc.title}' 스크랩을 지울까요?`,
+  });
+  const has = sc.photo && photoUrls[sc.photo];
+  $('#modalBody').insertAdjacentHTML('beforeend', `
+    <div class="field"><span>사진 1장 (선택)</span>
+      <div class="cover-pick">
+        <span class="cover-thumb" id="scrapThumb" style="${has ? `background-image:url('${photoUrls[sc.photo]}')` : ''}"></span>
+        <label class="btn sm">사진 고르기·찍기<input type="file" id="scrapPhoto" accept="image/*" hidden></label>
+        ${has ? '<label class="small"><input type="checkbox" id="scrapDrop"> 사진 빼기</label>' : ''}
+      </div>
+    </div>
+    <div class="field"><span>위치 (선택)</span>
+      <div class="row"><span class="muted small grow" id="scrapPos"></span>
+        <button type="button" class="btn sm" id="scrapHere">📍 지금 위치</button>
+        <button type="button" class="btn sm ghost" id="scrapNoPos">빼기</button></div>
+    </div>`);
+  const showPos = () => {
+    $('#scrapPos').textContent = pos ? `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}` : '없음 — 일정에 넣은 뒤 장소 찾기로도 돼요';
+    $('#scrapNoPos').hidden = !pos;
+  };
+  showPos();
+  $('#scrapPhoto').onchange = (ev) => {
+    file = ev.target.files[0] || null;
+    if (file) $('#scrapThumb').style.backgroundImage = `url('${URL.createObjectURL(file)}')`;
+  };
+  if ($('#scrapDrop')) $('#scrapDrop').onchange = (ev) => { dropPhoto = ev.target.checked; };
+  $('#scrapNoPos').onclick = () => { pos = null; showPos(); };
+  $('#scrapHere').onclick = () => {
+    if (!navigator.geolocation) return toast('이 폰에서는 위치를 쓸 수 없어요');
+    $('#scrapPos').textContent = '위치 찾는 중…';
+    navigator.geolocation.getCurrentPosition(
+      (p) => { pos = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) }; showPos(); },
+      () => { showPos(); toast('위치를 못 가져왔어요 (위치 권한·GPS를 확인하세요)'); },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+  };
+}
+
+// 스크랩 → 고른 여행의 고른 날 맨 뒤에 (시간 미정). 사진은 스크랩과 함께 지운다.
+function scrapPlanForm(sc) {
+  const trips = sortTrips(state.trips);
+  if (!trips.length) return toast('먼저 여행을 만들어 주세요');
+  const first = focusTrip() || trips[0];
+  const dayOpts = (t) => t.days.map((d, i) => `<option value="${d.date}">Day ${i + 1} · ${fmtDate(d.date)}${d.city ? ' · ' + esc(d.city) : ''}</option>`).join('');
+  openModal({
+    title: `“${sc.title}” 일정에 넣기`,
+    html: `<label class="field"><span>여행</span><select name="trip" id="scrapTrip">${trips.map((t) => `<option value="${t.id}" ${t === first ? 'selected' : ''}>${esc(t.emoji)} ${esc(t.title)}</option>`).join('')}</select></label>
+      <label class="field"><span>날짜</span><select name="date" id="scrapDay">${dayOpts(first)}</select></label>
+      <p class="muted small">그날 일정 맨 뒤에 ‘시간 미정’으로 들어가요. 넣은 뒤 스크랩 목록에서는 빠져요.</p>`,
+    saveLabel: '넣기',
+    onSave: (d) => {
+      const t = getTrip(d.trip);
+      const day = t && t.days.find((x) => x.date === d.date);
+      if (!day) { toast('날짜를 골라 주세요'); return false; }
+      const it = { id: uid(), time: '', dur: '', title: sc.title, place: hasPos(sc) ? '' : sc.title, memo: sc.memo || '', cat: guessCat(sc.title), cost: '', ticketUrl: '', bookingId: '', done: false };
+      if (hasPos(sc)) Object.assign(it, { lat: sc.lat, lng: sc.lng });
+      day.items.push(it);
+      state.scraps = scraps().filter((x) => x !== sc);
+      if (sc.photo) deletePhotos([sc.photo]);
+      toast(`${fmtDate(day.date)} 일정에 넣었어요`, { label: '보러 가기', run: () => { pickTrip(t.id); selectedDate = day.date; subTab = 'plan'; remember('sub', subTab); setMain('trips'); } });
+    },
+  });
+  // 오늘이 여행 기간이면 오늘을 먼저 골라 둔다
+  const sync = () => {
+    const t = getTrip($('#scrapTrip').value);
+    $('#scrapDay').innerHTML = dayOpts(t);
+    if (t.days.some((x) => x.date === todayStr())) $('#scrapDay').value = todayStr();
+  };
+  $('#scrapTrip').onchange = sync;
+  sync();
+}
+
 // 홈: 지금(또는 다음) 여행의 오늘 할 일을 한눈에
 function renderToday() {
   const t = autoTrip();
-  if (!t) return renderNoTrip();
+  if (!t) return renderNoTrip() + scrapHtml();
   const p = phaseOf(t);
   const today = todayStr();
-  let html = `<div class="section-title"><h3>${p === 'now' ? '지금 여행 중' : p === 'soon' ? '다음 여행' : '최근 여행'}</h3></div>${tripCard(t)}`;
+  // 빠른 스크랩은 바로 누를 수 있게 맨 위에도 (목록은 아래 '스크랩' 칸)
+  let html = `<div class="section-title"><h3>${p === 'now' ? '지금 여행 중' : p === 'soon' ? '다음 여행' : '최근 여행'}</h3>
+    <button class="btn sm" data-act="scrap-add">📌 빠른 스크랩</button></div>${tripCard(t)}`;
 
   if (p === 'now') {
     const day = t.days.find((d) => d.date === today);
@@ -821,6 +941,7 @@ function renderToday() {
         </li>`).join('') || '<li class="empty-state">준비 끝! 즐거운 여행 되세요</li>'}</ul></div>
       <button class="add-btn" data-act="goto-sub" data-v="check" data-id="${t.id}">체크리스트 전체 보기</button>`;
   }
+  html += scrapHtml();
   html += '<button class="cta home-new" data-act="new-trip">＋ 새로운 여행 일정 만들기</button>';
   return html;
 }
@@ -3310,6 +3431,9 @@ $('#view').addEventListener('click', (ev) => {
     case 'vault-view': withVault(() => openVoucher({ title: '🛂 비상 서류', vouchers: vault().docs })); break;
     case 'vault-edit': withVault(vaultForm); break;
     case 'phrases': openPhrases(id ? getTrip(id) : ft); break;
+    case 'scrap-add': scrapForm(null); break;
+    case 'scrap-edit': scrapForm(scraps().find((x) => x.id === id)); break;
+    case 'scrap-plan': scrapPlanForm(scraps().find((x) => x.id === id)); break;
     case 'day-note': noteForm(ft, el.dataset.date); break;
     case 'story': openStory(ft); break;
     case 'photo-add': photoTarget = { tripId: ft.id, date: el.dataset.date }; photoPicker.click(); break;

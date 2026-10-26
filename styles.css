@@ -819,3 +819,16 @@ hr.soft { border: 0; border-top: 1px solid var(--line); margin: 8px 0 10px; }
 .ps-nav { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .ps-nav .btn { background: #fff; color: #111; border-color: #ccc; }
 .ps-nav .btn:disabled { opacity: .35; }
+
+/* 홈: 빠른 스크랩 */
+.scrap-list { padding: 4px 12px; }
+.scrap-item { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.scrap-item:last-child { border-bottom: 0; }
+.scrap-item .grow { flex: 1; min-width: 0; cursor: pointer; }
+.scrap-item .grow b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scrap-item .grow .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scrap-thumb {
+  flex: 0 0 auto; width: 48px; height: 48px; border-radius: 10px; border: 0; cursor: pointer; font-size: 20px;
+  background: var(--surface-2) center / cover no-repeat;
+}
+.scrap-empty { margin: -4px 2px 6px; }
