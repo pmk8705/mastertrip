@@ -537,7 +537,7 @@ function openModal({ title, fields = [], html = '', onSave, onDelete, saveLabel 
 
 function fieldHtml(f) {
   const v = esc(f.value ?? '');
-  const attrs = `name="${f.name}" ${f.required ? 'required' : ''} ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ''}`;
+  const attrs = `name="${f.name}" ${f.required ? 'required' : ''} ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ''} ${f.attrs || ''}`;
   let input;
   if (f.type === 'select') {
     input = `<select ${attrs}>${f.options.map((o) => (typeof o === 'object'
@@ -3175,7 +3175,8 @@ function bookForm(trip, b) {
       { name: 'type', label: '종류', type: 'select', options: Object.keys(BOOK_TYPES), value: b.type },
       { name: 'title', label: '이름', value: b.title, required: true },
       { name: 'date', label: '날짜', type: 'date', value: b.date },
-      { name: 'code', label: '예약번호', value: b.code },
+      // 예약번호는 보통 대문자+숫자: 처음부터 대문자, 자동 고침·맞춤법 검사·자동 완성 끔
+      { name: 'code', label: '예약번호', value: b.code, attrs: 'autocapitalize="characters" autocorrect="off" autocomplete="off" spellcheck="false"' },
       { name: 'link', label: '예약 페이지 링크', type: 'url', value: b.link, placeholder: 'https://' },
       { name: 'memo', label: '메모 (주소, 체크인 시간, 좌석 등)', type: 'textarea', value: b.memo },
     ],
@@ -3728,8 +3729,21 @@ window.addEventListener('online', () => { if (inDetail()) render(); refreshRates
 window.addEventListener('offline', () => { if (inDetail()) render(); });
 
 // 자정이 지나면 오늘 날짜/D-day 갱신 (환율도 날이 바뀌었으면 다시)
+// 새 버전 알림: 앱을 끄지 않고 뒤로 보냈다 돌아오면 화면은 예전 코드 그대로라서,
+// 서버의 sw.js 버전(CACHE)이 처음 열 때와 다르면 [새로고침]을 권한다.
+let appVersion = null;
+const swVersion = () => fetch('sw.js', { cache: 'no-store' })
+  .then((r) => r.text()).then((t) => (t.match(/CACHE = '([^']+)'/) || [])[1] || null).catch(() => null);
+if (navigator.onLine) swVersion().then((v) => { appVersion = v; });
+async function checkNewVersion() {
+  if (!navigator.onLine || !appVersion) return;
+  const v = await swVersion();
+  if (v && v !== appVersion && !document.hidden) toast('새 버전이 있어요', { label: '새로고침', run: () => location.reload() });
+}
+
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { vaultOpen = false; commitDelete(); return; } // 비상 서류는 앱이 뒤로 가면 다시 잠금. 되돌리기 기다리던 삭제는 확정
+  if (document.hidden) { vaultOpen = false; commitDelete(); return; }
+  checkNewVersion(); // 비상 서류는 앱이 뒤로 가면 다시 잠금. 되돌리기 기다리던 삭제는 확정
   render();
   refreshRates();
 });
