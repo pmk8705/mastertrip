@@ -1012,7 +1012,6 @@ async function ensureFootGeo(trip) { // 위치를 모르는 도시는 한 번 �
 function footprintHtml(trip) {
   const cities = footCities(trip);
   if (cities.length < 2) return '';
-  if (!navigator.onLine) return '<div class="map-note">발자취 지도는 인터넷이 연결되면 보여요</div>';
   return `<div class="card foot-card"><div class="row foot-head"><b>🗺 발자취</b><span class="spacer"></span>
     <span class="muted small">${cities.map((c) => esc(c.city)).join(' → ')}</span></div><div id="footMap"></div></div>`;
 }
@@ -1685,15 +1684,16 @@ async function geocodeAll(trip) {
 
 function mapSection(trip, day) {
   const missing = missingPlaces(trip).length;
-  const fix = missing ? `<button class="btn sm" data-act="geocode-all">📍 장소 위치 자동 찾기 (${missing}곳)</button>` : '';
-  if (!navigator.onLine) return '<div class="map-note">오프라인이라 지도는 숨겼어요. 일정은 아래에서 볼 수 있어요.</div>';
-  if (!day.items.some(hasPos)) return fix ? `<div class="map-note">${fix}</div>` : '';
+  // 위치 찾기는 인터넷이 필요. 오프라인이어도 지도는 보여 준다 (한 번 본 지도 그림은 서비스 워커가 저장해 둠)
+  const fix = missing && navigator.onLine ? `<button class="btn sm" data-act="geocode-all">📍 장소 위치 자동 찾기 (${missing}곳)</button>` : '';
+  const off = navigator.onLine ? '' : '<div class="map-note">인터넷이 없어요 · 전에 본 지도만 보여요 (안 본 곳은 회색)</div>';
+  if (!day.items.some(hasPos)) return fix ? `<div class="map-note">${fix}</div>` : off;
   return `
     <div class="map-wrap ${mapOpen ? '' : 'closed'}">
       <div id="map"></div>
       <button class="map-toggle" data-act="toggle-map">${mapOpen ? '지도 접기 ▲' : '지도 펼치기 ▼'}</button>
     </div>
-    ${fix ? `<div class="map-note">${fix}</div>` : ''}`;
+    ${fix ? `<div class="map-note">${fix}</div>` : off}`;
 }
 
 // 그날 일정 중 위치가 있는 곳에 번호 핀(타임라인 번호와 같음) + 방문 순서대로 점선
