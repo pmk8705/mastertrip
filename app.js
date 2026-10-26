@@ -705,6 +705,7 @@ function render() {
     else view.innerHTML = tripSwitchRow(t) + (subTab === 'plan' ? renderDays(t) : subTab === 'check' ? renderCheck(t) : subTab === 'budget' ? renderBudget(t) : renderBook(t));
   }
   if (mainTab === 'records' && focusTrip()) mountFootprint(focusTrip());
+  if (mainTab === 'settings') fillStorage();
   if (detail) {
     centerActiveChip(stripLeft);
     mountMap(detailTrip(), currentDay());
@@ -3239,12 +3240,42 @@ function renderSettings() {
         <button type="button" class="btn" data-act="import-file">⬆ 가져오기</button>
       </div>
     </div>
+    <div class="section-title"><h3>저장 공간</h3></div>
+    <div class="card" id="storageInfo"><span class="muted small">계산 중…</span></div>
     <div class="section-title"><h3>데이터</h3></div>
     <div class="card">
       <p class="small muted" style="margin-top:0">모든 여행을 지우고 처음 상태(스페인 여행 초안)로 돌아갑니다.</p>
       <button type="button" class="btn danger" data-act="reset" style="padding-left:0">처음 상태로 초기화</button>
     </div>
     <p class="muted small" style="text-align:center">MasterTrip Planner</p>`;
+}
+
+// 설정 화면: 이 폰에서 쓰는 저장 공간 (보여 주기만. 자동 정리는 하지 않음 — 잘못 판단하면 여권 사본 등을 지울 수 있어서)
+const mb = (n) => (!n ? '없음' : n < 1e6 ? `${Math.max(0.1, n / 1e6).toFixed(1)}MB` : `${(n / 1e6).toFixed(n < 1e7 ? 1 : 0)}MB`);
+async function fillStorage() {
+  const box = $('#storageInfo');
+  if (!box) return;
+  const size = async (store) => { try { return (await store.values()).reduce((a, b) => a + (b ? b.size : 0), 0); } catch (e) { return 0; } };
+  const vaultIds = new Set(vault().docs.map((d) => d.id));
+  let docs = 0, vouchers = 0;
+  try {
+    const [keys, vals] = await Promise.all([voucherDb.keys(), voucherDb.values()]);
+    keys.forEach((k, i) => { if (vaultIds.has(k)) docs += vals[i].size; else vouchers += vals[i].size; });
+  } catch (e) { /* 못 읽으면 0 */ }
+  const [photos, covers] = await Promise.all([size(photoDb), size(media)]);
+  let tiles = 0;
+  try { if (window.caches) tiles = (await (await caches.open('mastertrip-tiles')).keys()).length; } catch (e) { /* 없으면 0 */ }
+  const text = new Blob([localStorage.getItem(STORE_KEY) || '']).size;
+  let total = '';
+  try {
+    const est = navigator.storage && navigator.storage.estimate && await navigator.storage.estimate();
+    if (est && est.usage) total = `앱 전체 약 ${mb(est.usage)}${est.quota ? ` · 폰이 허락한 공간 ${(est.quota / 1e9).toFixed(est.quota < 1e10 ? 1 : 0)}GB` : ''}`;
+  } catch (e) { /* 지원 안 하면 생략 */ }
+  if (!box.isConnected) return;
+  const row = (k, v) => `<div class="row small"><span>${k}</span><span class="spacer"></span><b class="num">${v}</b></div>`;
+  box.innerHTML = row('📷 사진 (기록·일정·스크랩)', mb(photos)) + row('🎫 바우처', mb(vouchers)) + row('🛂 비상 서류', mb(docs))
+    + row('🖼 표지 사진', mb(covers)) + row('📝 일정·지출 등 글자', mb(text)) + row('🗺 저장된 지도', tiles ? `${tiles.toLocaleString('ko-KR')}장` : '없음')
+    + (total ? `<p class="muted small" style="margin:8px 0 0">${total}</p>` : '');
 }
 
 function resetAll() {
