@@ -137,6 +137,7 @@ function placesFromDays(days) {
 function save() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    syncSoon(); // 로그인해 두었으면 몇 초 뒤 서버와 맞추기 (sync.js)
   } catch (e) {
     toast('저장 실패: 저장 공간을 확인하세요');
   }
@@ -3562,6 +3563,9 @@ $('#view').addEventListener('click', (ev) => {
     case 'goto-sub': pickTrip(id); mainTab = 'trips'; remember('main', mainTab); setSub(el.dataset.v); window.scrollTo(0, 0); break;
     case 'sync-login': loginForm(); break;
     case 'sync-logout': logout(); break;
+    case 'sync-invite': inviteForm(id); break;
+    case 'sync-join': loadSupabase().then(joinForm); break;
+    case 'sync-password': loadSupabase().then(newPasswordForm); break;
     case 'sync-upload': withVault(uploadMyTrips); break; // 자동 백업에 비상 서류가 들어가니 잠금이 켜져 있으면 확인 후
     case 'export': withVault(exportData); break; // 백업에 비상 서류가 들어가니 잠금이 켜져 있으면 확인 후
     case 'import-file': importPicker.click(); break;
@@ -3736,7 +3740,7 @@ $('#view').addEventListener('touchend', (ev) => {
 }, { passive: true });
 
 // 인터넷이 끊기거나 다시 연결되면 지도 표시를 바꾼다
-window.addEventListener('online', () => { if (inDetail()) render(); refreshRates(); });
+window.addEventListener('online', () => { if (inDetail()) render(); refreshRates(); syncSoon(1500); });
 window.addEventListener('offline', () => { if (inDetail()) render(); });
 
 // 자정이 지나면 오늘 날짜/D-day 갱신 (환율도 날이 바뀌었으면 다시)
@@ -3754,7 +3758,8 @@ async function checkNewVersion() {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { vaultOpen = false; commitDelete(); return; }
-  checkNewVersion(); // 비상 서류는 앱이 뒤로 가면 다시 잠금. 되돌리기 기다리던 삭제는 확정
+  checkNewVersion();
+  syncSoon(1500); // 앱으로 돌아오면 배우자가 고친 것 받기 // 비상 서류는 앱이 뒤로 가면 다시 잠금. 되돌리기 기다리던 삭제는 확정
   render();
   refreshRates();
 });
