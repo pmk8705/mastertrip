@@ -64,10 +64,10 @@ const ITEM_CATS = {
 // 분류가 없는 예전 일정은 제목으로 짐작한다 (나중에 바꿀 수 있음)
 function guessCat(title) {
   const rules = [
-    // 영어·스페인어 이름도 (공유로 받은 가게 이름은 현지어인 경우가 많음)
-    [/점심|저녁|아침|식사|타파스|디너|빠에야|레스토랑|맛집|해산물|(?<![a-z])(bar|bodega|taberna|tapas|restaurante?|marisquer[ií]a|cervecer[ií]a|tasca|asador)(?![a-z])/i, '식사'],
-    [/카페|커피|디저트|(?<![a-z])(caf[eé]|coffee|cafeter[ií]a|churrer[ií]a|pasteler[ií]a|helader[ií]a|bakery)(?![a-z])/i, '카페'],
-    [/쇼핑|시장|기념품|아울렛|(?<![a-z])(mercado|market|shop|tienda|outlet)(?![a-z])/i, '쇼핑'],
+    // 영어·스페인어 이름도 (공유로 받은 가게 이름은 현지어인 경우가 많음). 앞 경계는 (?<!…) 대신 (?:^|[^a-z]): 옛 iOS(16.3 이하)는 뒤돌아보기 문법에서 앱 전체가 멈춤
+    [/점심|저녁|아침|식사|타파스|디너|빠에야|레스토랑|맛집|해산물|(?:^|[^a-z])(bar|bodega|taberna|tapas|restaurante?|marisquer[ií]a|cervecer[ií]a|tasca|asador)(?![a-z])/i, '식사'],
+    [/카페|커피|디저트|(?:^|[^a-z])(caf[eé]|coffee|cafeter[ií]a|churrer[ií]a|pasteler[ií]a|helader[ií]a|bakery)(?![a-z])/i, '카페'],
+    [/쇼핑|시장|기념품|아울렛|(?:^|[^a-z])(mercado|market|shop|tienda|outlet)(?![a-z])/i, '쇼핑'],
     [/이동|공항|출국|도착|귀가|기차|버스|항공|트램|페리/, '이동'],
     [/체크인|체크아웃|숙소|호텔/, '숙소'],
     [/공연|플라멩코|해변|스파|투어|드라이브|일몰|전망대/, '액티비티'],
@@ -1622,7 +1622,9 @@ const hasPos = (it) => typeof it.lat === 'number' && typeof it.lng === 'number';
 
 // 국내 여행은 네이버 지도, 해외는 구글 지도 웹사이트로 (앱이 없어도 열림)
 // 인터넷이 없으면 웹 지도는 안 열리니 폰의 지도 앱으로 (미리 받아 둔 오프라인 지도를 쓸 수 있게).
-// 해외 = geo: (지도 앱 고르기), 국내 = 네이버 지도 앱. web=true면 항상 웹 (장소 찾기 버튼용)
+// 해외 = geo: (지도 앱 고르기, 아이폰은 애플 지도), 국내 = 네이버 지도 앱. web=true면 항상 웹 (장소 찾기 버튼용)
+// 아이패드는 데스크톱처럼 보고하므로 터치 여부로 구분
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 function mapLink(trip, it, web) {
   const q = it.place || (hasPos(it) ? `${it.lat},${it.lng}` : '');
   if (!q) return null;
@@ -1632,6 +1634,11 @@ function mapLink(trip, it, web) {
       const url = hasPos(it) ? `nmap://place?lat=${it.lat}&lng=${it.lng}&name=${name}&appname=pmk8705.github.io`
         : `nmap://search?query=${encodeURIComponent(q)}&appname=pmk8705.github.io`;
       return { url, label: '📱 네이버 지도 앱으로 보기 ›', app: true };
+    }
+    // 아이폰은 geo:를 못 알아들어서 애플 지도(maps://)로
+    if (IS_IOS) {
+      const url = hasPos(it) ? `maps://?ll=${it.lat},${it.lng}&q=${name || `${it.lat},${it.lng}`}` : `maps://?q=${encodeURIComponent(q)}`;
+      return { url, label: '📱 애플 지도로 보기 ›', app: true };
     }
     const url = hasPos(it) ? `geo:${it.lat},${it.lng}?q=${it.lat},${it.lng}(${name})` : `geo:0,0?q=${encodeURIComponent(q)}`;
     return { url, label: '📱 지도 앱으로 보기 ›', app: true };
