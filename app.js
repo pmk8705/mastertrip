@@ -3240,6 +3240,7 @@ function renderSettings() {
       <div class="seg-btns">${Object.entries(THEMES).map(([k, l]) =>
         `<button type="button" class="btn sm${k === theme ? ' primary' : ''}" data-act="theme" data-v="${k}">${l}</button>`).join('')}</div>
     </div>
+    ${syncCardHtml()}
     <div class="section-title"><h3>백업</h3></div>
     <div class="card">
       <p class="small muted" style="margin-top:0">데이터는 이 폰 안에만 저장돼요. 폰을 바꾸거나 브라우저 데이터를 지우면 사라지니 가끔 내보내기로 백업하세요. 백업에는 모든 여행이 들어갑니다. 가져오기는 백업 파일과 받은 여행 파일(.mastertrip.pdf)을 모두 열 수 있어요.</p>
@@ -3559,6 +3560,9 @@ $('#view').addEventListener('click', (ev) => {
     case 'geocode-all': geocodeAll(detailTrip()); break;
     case 'edit-trip': tripForm(ft); break;
     case 'goto-sub': pickTrip(id); mainTab = 'trips'; remember('main', mainTab); setSub(el.dataset.v); window.scrollTo(0, 0); break;
+    case 'sync-login': loginForm(); break;
+    case 'sync-logout': logout(); break;
+    case 'sync-upload': withVault(uploadMyTrips); break; // 자동 백업에 비상 서류가 들어가니 잠금이 켜져 있으면 확인 후
     case 'export': withVault(exportData); break; // 백업에 비상 서류가 들어가니 잠금이 켜져 있으면 확인 후
     case 'import-file': importPicker.click(); break;
     case 'vault-view': withVault(() => openVoucher({ title: '🛂 비상 서류', vouchers: vault().docs })); break;
@@ -3758,6 +3762,7 @@ document.addEventListener('visibilitychange', () => {
 render();
 refreshRates();
 Promise.all([loadCovers(), loadPhotos()]).then(render);
+syncBoot(); // 예전에 로그인했으면 다시 연결 (sync.js)
 const sharedIn = readShared();
 if (sharedIn) setTimeout(() => scrapForm(null, sharedIn), 300);
 
