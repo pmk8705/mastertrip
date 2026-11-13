@@ -222,3 +222,11 @@ create policy "trip-media: members replace" on storage.objects for update to aut
   using (bucket_id = 'trip-media' and public.is_trip_member((storage.foldername(name))[1]));
 create policy "trip-media: members delete" on storage.objects for delete to authenticated
   using (bucket_id = 'trip-media' and public.is_trip_member((storage.foldername(name))[1]));
+
+-- ───────────── 잠들지 않게 (2026-11-13 추가) ─────────────
+-- 무료 요금제는 1주일 동안 안 쓰면 잠든다 → GitHub Actions(.github/workflows/keepalive.yml)가 3일마다 부른다.
+-- 데이터는 하나도 읽지 않고 서버 시각만 돌려준다 (로그인 안 한 사람도 부를 수 있음).
+create or replace function public.keepalive() returns timestamptz
+language sql stable set search_path = public as $$ select now() $$;
+revoke execute on function public.keepalive() from public;
+grant execute on function public.keepalive() to anon, authenticated;
