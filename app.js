@@ -1888,6 +1888,10 @@ function renderDays(trip) {
       <ul class="timeline2">${items}</ul>
     </div>
     <button class="add-btn" data-act="add-item">+ 장소 추가</button>
+    <div class="xl-btns">
+      <button type="button" class="btn sm" data-act="xl-import">📄 엑셀 불러오기</button>
+      <button type="button" class="btn sm" data-act="xl-export">📤 엑셀로 내보내기</button>
+    </div>
     <p class="muted small" style="text-align:center;margin-top:14px">일정을 누르면 수정, 좌우로 밀면 다른 날로 넘어가요.<br>왼쪽 동그라미를 잡고 위아래로 끌면 순서가 바뀌어요.${hasLeg ? '<br>“자동” 이동 시간은 직선거리 어림값이에요. 이동 줄을 눌러 수단·시간을 정할 수 있어요.' : ''}${hasDepart ? '<br>기차·비행기 일정의 시간은 출발 시각으로 보고, 역 30분·공항 2시간 전 도착 여유를 확인해요.' : ''}</p>`;
 }
 
@@ -2694,6 +2698,7 @@ function planForm(trip) {
 }
 
 /* ============ 예약·서류 ============ */
+const BOOK_STATUS = ['예약대기', '예약완료', '결제완료', '취소'];
 const BOOK_TYPES = { 항공: '✈️', 숙소: '🏨', 교통: '🚆', 렌터카: '🚗', 관광: '🎟️', 식당: '🍽️', 보험: '🛡️', 기타: '📄' };
 
 /* ---------- 숙소·항공·교통 비교 (여러 예약 사이트, 국내/해외에 따라 다름) ---------- */
@@ -2720,7 +2725,7 @@ const iata = (code) => IATA_CITY[code] || code.toUpperCase();
 function bookCtx(trip, b) {
   const day = b.date && trip.days.find((d) => d.date === b.date);
   const dayCity = day ? dayCities(day).slice(-1)[0] || '' : '';
-  const nights = Number((b.title.match(/(\d+)\s*박/) || [])[1]) || 1;
+  const nights = (b.end && b.date && diffDays(b.end, b.date) > 0 ? diffDays(b.end, b.date) : 0) || Number((b.title.match(/(\d+)\s*박/) || [])[1]) || 1; // 끝 날짜가 있으면 그걸로
   const [fromTxt, toTxt] = b.title.split(/→|->|~/);
   const from = findCity(fromTxt || '', AIRPORT), to = findCity(toTxt || '', AIRPORT);
   const cleaned = b.title.replace(/\(.*?\)|숙소|호텔|\d+\s*박/g, '').trim();
@@ -3109,8 +3114,9 @@ function renderBook(trip) {
     <div class="book-item" data-act="edit-book" data-id="${b.id}">
       <div class="book-type">${BOOK_TYPES[b.type] || '📄'}</div>
       <div class="book-main">
-        <div class="row"><b>${esc(b.title)}</b><span class="spacer"></span><span class="muted small">${b.date ? fmtDate(b.date) : ''}</span></div>
+        <div class="row"><b>${esc(b.title)}</b><span class="spacer"></span><span class="muted small">${b.date ? fmtDate(b.date) : ''}${b.end ? ' ~ ' + fmtDate(b.end).slice(3) : ''}${b.time ? ' ' + esc(b.time) : ''}</span></div>
         <div class="${b.code ? 'book-code' : 'book-code empty'}">${b.code ? esc(b.code) : '예약번호 미입력'}</div>
+        ${b.status || b.amount ? `<div class="small book-meta">${b.status ? `<span class="book-status s-${BOOK_STATUS.indexOf(b.status)}">${esc(b.status)}</span>` : ''}${b.amount ? `<b class="num">${won(b.amount)}</b>` : ''}</div>` : ''}
         ${b.memo ? `<div class="muted small" style="white-space:pre-wrap">${esc(b.memo)}</div>` : ''}
         ${b.link ? `<a class="small" href="${esc(b.link)}" target="_blank" rel="noopener" data-act="link">🔗 예약 페이지</a>` : ''}
         ${voucherBtn(b)}
@@ -3217,14 +3223,20 @@ function bookForm(trip, b) {
     fields: [
       { name: 'type', label: '종류', type: 'select', options: Object.keys(BOOK_TYPES), value: b.type },
       { name: 'title', label: '이름', value: b.title, required: true },
-      { name: 'date', label: '날짜', type: 'date', value: b.date },
+      { name: 'date', label: '날짜 (숙소·렌터카는 시작일)', type: 'date', value: b.date },
+      { name: 'end', label: '끝 날짜 (체크아웃·반납, 없으면 비우기)', type: 'date', value: b.end || '' },
+      { name: 'time', label: '시간', value: b.time || '', placeholder: '예: 15:00, 오전' },
+      { name: 'status', label: '상태', type: 'select', options: ['', ...BOOK_STATUS], value: b.status || '' },
+      { name: 'amount', label: '금액 (원) — 예산의 분류별 합계에 쓰여요', type: 'number', won: true, value: b.amount || '' },
       // 예약번호는 보통 대문자+숫자: 처음부터 대문자, 자동 고침·맞춤법 검사·자동 완성 끔
       { name: 'code', label: '예약번호', value: b.code, attrs: 'autocapitalize="characters" autocorrect="off" autocomplete="off" spellcheck="false"' },
       { name: 'link', label: '예약 페이지 링크', type: 'url', value: b.link, placeholder: 'https://' },
       { name: 'memo', label: '메모 (주소, 체크인 시간, 좌석 등)', type: 'textarea', value: b.memo },
     ],
     onSave: (d) => {
-      Object.assign(b, d);
+      const amount = parseFloat(d.amount);
+      Object.assign(b, d, { amount: amount > 0 ? amount : '' });
+      if (b.end && b.date && b.end < b.date) { toast('끝 날짜가 시작일보다 빨라요'); return false; }
       const prev = b.vouchers || [];
       b.vouchers = files.list();
       if (isNew) trip.bookings.push(b);
@@ -3283,6 +3295,14 @@ function renderSettings() {
       <div class="row" style="flex-wrap:wrap">
         <button type="button" class="btn" data-act="export">⬇ 내보내기 (백업)</button>
         <button type="button" class="btn" data-act="import-file">⬆ 가져오기</button>
+      </div>
+    </div>
+    <div class="section-title"><h3>엑셀</h3></div>
+    <div class="card">
+      <p class="small muted" style="margin-top:0">엑셀 계획표(MasterTrip 양식)로 일정·예약·예산을 한 번에 넣어요. 다시 불러오면 바뀐 것만 반영되고, 앱에서 넣은 위치·바우처·사진·완료 체크는 그대로예요.</p>
+      <div class="row" style="flex-wrap:wrap">
+        <button type="button" class="btn" data-act="xl-import">📄 엑셀 불러오기</button>
+        ${focusTrip() ? '<button type="button" class="btn" data-act="xl-export">📤 지금 여행을 엑셀로</button>' : ''}
       </div>
     </div>
     <div class="section-title"><h3>저장 공간</h3></div>
@@ -3608,6 +3628,8 @@ $('#view').addEventListener('click', (ev) => {
     case 'vault-edit': withVault(vaultForm); break;
     case 'phrases': openPhrases(id ? getTrip(id) : ft); break;
     case 'scrap-add': scrapForm(null); break;
+    case 'xl-import': excelImport(); break;
+    case 'xl-export': excelExport(ft); break;
     case 'item-photo': {
       const it = day && day.items.find((x) => x.id === id);
       if (it && photoUrls[it.photo]) viewerShell(it.title).querySelector('.viewer-body').innerHTML = `<img src="${photoUrls[it.photo]}" alt=""><p class="viewer-note">사진을 누르면 크게</p>`;
