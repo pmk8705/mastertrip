@@ -2630,6 +2630,7 @@ function renderBudget(trip) {
     ${payHtml(trip)}
     ${cats ? `<div class="section-title"><h3>항목별</h3></div><div class="card">${cats}</div>` : ''}
     <button class="add-btn" data-act="add-exp">+ 지출 기록</button>
+    ${trip.expenses.length ? '<div class="xl-btns"><button type="button" class="btn sm" data-act="xl-ledger">📒 가계부 엑셀로 내보내기</button></div>' : ''}
     <div class="section-title"><h3>지출 내역</h3><span class="muted small">${exps.length}건</span></div>
     <div class="card" style="padding:4px 14px">${expHtml}</div>`;
 }
@@ -3302,7 +3303,7 @@ function renderSettings() {
       <p class="small muted" style="margin-top:0">엑셀 계획표(MasterTrip 양식)로 일정·예약·예산을 한 번에 넣어요. 다시 불러오면 바뀐 것만 반영되고, 앱에서 넣은 위치·바우처·사진·완료 체크는 그대로예요.</p>
       <div class="row" style="flex-wrap:wrap">
         <button type="button" class="btn" data-act="xl-import">📄 엑셀 불러오기</button>
-        ${focusTrip() ? '<button type="button" class="btn" data-act="xl-export">📤 지금 여행을 엑셀로</button>' : ''}
+        ${focusTrip() ? '<button type="button" class="btn" data-act="xl-export">📤 지금 여행을 엑셀로</button><button type="button" class="btn" data-act="xl-ledger">📒 가계부(지출) 엑셀로</button>' : ''}
       </div>
     </div>
     <div class="section-title"><h3>저장 공간</h3></div>
@@ -3630,6 +3631,7 @@ $('#view').addEventListener('click', (ev) => {
     case 'scrap-add': scrapForm(null); break;
     case 'xl-import': excelImport(); break;
     case 'xl-export': excelExport(ft); break;
+    case 'xl-ledger': excelLedger(ft); break;
     case 'item-photo': {
       const it = day && day.items.find((x) => x.id === id);
       if (it && photoUrls[it.photo]) viewerShell(it.title).querySelector('.viewer-body').innerHTML = `<img src="${photoUrls[it.photo]}" alt=""><p class="viewer-note">사진을 누르면 크게</p>`;

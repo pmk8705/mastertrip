@@ -497,3 +497,94 @@ async function excelExport(trip) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   toast(`엑셀로 저장했어요 (${name})`);
 }
+
+/* ---------- 가계부: 지출을 엑셀로 (내보내기만 — 지출은 앱이 원본이라 불러오기는 이 파일을 읽지 않음) ---------- */
+async function excelLedger(trip) {
+  if (!trip) return;
+  if (!trip.expenses.length) return toast('아직 지출 기록이 없어요');
+  let X;
+  try { X = await loadXLSX(); } catch (e) { return toast(e.message); }
+  const serial = (ymd) => { const [y, m, dd] = ymd.split('-').map(Number); return Date.UTC(y, m - 1, dd) / 864e5 + 25569; };
+  const DATE = 'yyyy-mm-dd (aaa)', MONEY = '#,##0', RATE = '#,##0.0';
+  const enc = X.utils.encode_cell;
+  const wb = X.utils.book_new();
+  const setCell = (ws, r, c, v, z, f) => { const cell = { t: typeof v === 'number' ? 'n' : 's', v }; if (z) cell.z = z; if (f) cell.f = f; ws[enc({ r, c })] = cell; };
+  const finish = (ws, rows, cols, widths) => { ws['!ref'] = X.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows, c: cols } }); ws['!cols'] = widths.map((w) => ({ wch: w })); };
+
+  // 지출 시트: 한 줄 = 지출 하나 (원화는 수식: 엑셀에서 금액·환율을 고치면 다시 계산)
+  const list = [...trip.expenses].sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.id.localeCompare(b.id));
+  const ex = {};
+  const head = ['날짜', '분류', '내용', '금액', '통화', '원화(원)', '적용 환율', '결제 수단'];
+  setCell(ex, 0, 0, `${trip.title} 가계부 · 앱에서 내보냄 ${todayStr()} · 원화는 기록할 때의 환율로 계산`);
+  head.forEach((h, c) => setCell(ex, 1, c, h));
+  list.forEach((e, i) => {
+    const r = i + 2, R = r + 1;
+    const rate = e.currency === 'KRW' ? 1 : (e.rate || trip.budget.rate);
+    setCell(ex, r, 0, e.date ? serial(e.date) : '', e.date ? DATE : undefined);
+    setCell(ex, r, 1, e.cat || '기타');
+    setCell(ex, r, 2, e.memo || '');
+    setCell(ex, r, 3, Number(e.amount) || 0, e.currency === 'KRW' ? MONEY : '#,##0.00');
+    setCell(ex, r, 4, e.currency);
+    setCell(ex, r, 5, Math.round(toKRW(trip, e)), MONEY, `ROUND(IF(E${R}="KRW",D${R},D${R}*G${R}),0)`);
+    setCell(ex, r, 6, rate, RATE);
+    setCell(ex, r, 7, e.method || '');
+  });
+  finish(ex, list.length + 1, head.length - 1, [16, 8, 30, 11, 6, 13, 10, 11]);
+  X.utils.book_append_sheet(wb, ex, '지출');
+
+  // 요약 시트: 분류별(예산·쓴 돈·남은 돈) · 결제 수단별 · 날짜별 — 모두 지출 시트를 더하는 수식 (엑셀에서 고치면 같이 바뀜)
+  const sm = {};
+  const F = (col) => `'지출'!$${col}$3:$${col}$${list.length + 502}`;
+  const spentBy = (test) => Math.round(list.filter(test).reduce((a, e) => a + toKRW(trip, e), 0));
+  let r = 0;
+  setCell(sm, r++, 0, `${trip.title} 지출 요약 (원)`);
+  ['분류', '예산', '쓴 돈', '남은 돈'].forEach((h, c) => setCell(sm, r, c, h));
+  r++;
+  const catStart = r;
+  for (const k of CATS) {
+    const plan = Number(trip.budget.plan[k]) || 0, spent = spentBy((e) => e.cat === k), R = r + 1;
+    setCell(sm, r, 0, k);
+    setCell(sm, r, 1, plan, MONEY);
+    setCell(sm, r, 2, spent, MONEY, `SUMIF(${F('B')},"${k}",${F('F')})`);
+    setCell(sm, r, 3, plan - spent, MONEY, `B${R}-C${R}`);
+    r++;
+  }
+  const sumF = (col) => `SUM(${col}${catStart + 1}:${col}${r})`;
+  const planAll = CATS.reduce((a, k) => a + (Number(trip.budget.plan[k]) || 0), 0), spentAll = spentBy(() => true);
+  setCell(sm, r, 0, '전체');
+  setCell(sm, r, 1, planAll, MONEY, sumF('B'));
+  setCell(sm, r, 2, spentAll, MONEY, sumF('C'));
+  setCell(sm, r, 3, planAll - spentAll, MONEY, sumF('D'));
+  r += 2;
+  ['결제 수단', '쓴 돈'].forEach((h, c) => setCell(sm, r, c, h));
+  r++;
+  for (const m of [...Object.keys(PAY_METHODS), '']) {
+    const spent = spentBy((e) => (PAY_METHODS[e.method] ? e.method : '') === m);
+    if (!spent && m === '') continue;
+    setCell(sm, r, 0, m || '수단 없음');
+    setCell(sm, r, 1, spent, MONEY, `SUMIF(${F('H')},"${m}",${F('F')})`);
+    r++;
+  }
+  r++;
+  ['날짜', '도시', '쓴 돈'].forEach((h, c) => setCell(sm, r, c, h));
+  r++;
+  for (const d of trip.days) {
+    setCell(sm, r, 0, serial(d.date), DATE);
+    setCell(sm, r, 1, d.city || '');
+    setCell(sm, r, 2, spentBy((e) => e.date === d.date), MONEY, `SUMIF(${F('A')},A${r + 1},${F('F')})`);
+    r++;
+  }
+  finish(sm, r, 3, [16, 22, 14, 14]);
+  X.utils.book_append_sheet(wb, sm, '요약');
+
+  const out = X.write(wb, { bookType: 'xlsx', type: 'array' });
+  const name = `${trip.title.replace(/[\\/:*?"<>|]/g, '').trim() || '여행'}_가계부_${todayStr()}.xlsx`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast(`가계부를 저장했어요 (${name})`);
+}
