@@ -12,6 +12,7 @@ let sb = null; // supabase 연결 (불러온 뒤)
 let sbUser = null; // 로그인한 사람 {id, email}
 let syncBusy = false;
 let syncMsg = ''; // 설정 화면에 보여 줄 마지막 결과
+let syncLast = ''; // 마지막으로 무언가 받거나 보낸 결과 (할 일 없던 맞추기가 덮어쓰지 않게)
 
 /* ---------- 라이브러리 불러오기·로그인 상태 ---------- */
 const hasSavedSession = () => { try { return !!localStorage.getItem(SB_SESSION_KEY); } catch (e) { return false; } };
@@ -425,7 +426,10 @@ async function syncAll({ manual = false } = {}) {
       await syncMedia(id, store, report);
     }
     saveSyncStore(store);
-    syncMsg = report.join('\n') || `맞춤 · ${whenStr(new Date().toISOString())}`;
+    // 할 일이 없었던 맞추기는 지난번 결과를 지우지 않고 시각만 바꾼다 (사진 올린 직후 한 번 더 맞추면서 결과가 사라지던 문제)
+    const now = `맞춤 · ${whenStr(new Date().toISOString())}`;
+    if (report.length) { syncLast = `${report.join('\n')}`; syncMsg = `${now}\n${syncLast}`; }
+    else syncMsg = syncLast ? `${now}\n최근 바뀐 것:\n${syncLast}` : now;
     if (manual || report.some((l) => l.startsWith('✅') && !/받음 0 ·/.test(l))) render();
   } catch (e) {
     console.warn('맞추기 실패', e);
@@ -567,6 +571,7 @@ async function logout() {
   try { await loadSupabase(); await sb.auth.signOut(); } catch (e) { console.warn(e); }
   sbUser = null;
   syncMsg = '';
+  syncLast = '';
   render();
   toast('로그아웃했어요');
 }
