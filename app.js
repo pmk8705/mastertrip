@@ -536,6 +536,37 @@ function openModal({ title, fields = [], html = '', onSave, onDelete, saveLabel 
   if (first && !('ontouchstart' in window)) first.focus();
 }
 
+// 숫자 칸 쉼표: '1234567.5' → '1,234,567.5' (숫자·점 말고는 버림)
+function fmtNum(v) {
+  const t = String(v ?? '').replace(/[^\d.]/g, '');
+  if (!t) return '';
+  const [i, ...rest] = t.split('.');
+  const int = (i.replace(/^0+(?=\d)/, '') || (rest.length ? '0' : '')).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return rest.length ? `${int}.${rest.join('').slice(0, 4)}` : int;
+}
+const unNum = (v) => String(v ?? '').replace(/,/g, '');
+// 원 금액을 말로: 2000000 → “200만 원”, 146000000 → “1억 4,600만 원”
+function korWon(v) {
+  const n = Math.round(Number(unNum(v)) || 0);
+  if (!n) return '';
+  const eok = Math.floor(n / 1e8), man = Math.floor((n % 1e8) / 1e4), rest = n % 1e4;
+  const parts = [eok && `${eok.toLocaleString('ko-KR')}억`, man && `${man.toLocaleString('ko-KR')}만`, rest && !eok && rest.toLocaleString('ko-KR')].filter(Boolean);
+  return `${parts.join(' ')} 원`;
+}
+// 칠 때마다 쉼표 다시 넣기 (커서는 같은 숫자 뒤에 그대로)
+document.addEventListener('input', (ev) => {
+  const el = ev.target;
+  if (!el.matches || !el.matches('input[data-num]')) return;
+  const pos = el.selectionStart || 0;
+  const before = el.value.slice(0, pos).replace(/[^\d.]/g, '').length;
+  el.value = fmtNum(el.value);
+  let i = 0, seen = 0;
+  while (i < el.value.length && seen < before) { if (/[\d.]/.test(el.value[i])) seen++; i++; }
+  try { el.setSelectionRange(i, i); } catch (e) { /* 일부 칸은 커서 지정 불가 */ }
+  const hint = el.dataset.won != null && el.nextElementSibling;
+  if (hint && hint.classList.contains('num-hint')) hint.textContent = korWon(el.value);
+}, true);
+
 function fieldHtml(f) {
   const v = esc(f.value ?? '');
   const attrs = `name="${f.name}" ${f.required ? 'required' : ''} ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ''} ${f.attrs || ''}`;
@@ -546,9 +577,12 @@ function fieldHtml(f) {
       : `<option ${o === f.value ? 'selected' : ''}>${esc(o)}</option>`)).join('')}</select>`;
   } else if (f.type === 'textarea') {
     input = `<textarea ${attrs}>${v}</textarea>`;
+  } else if (f.type === 'number') {
+    // 숫자 칸은 글자 칸 + 숫자 키패드로: 칠 때 쉼표가 붙어 20만/200만이 헷갈리지 않게. won이면 아래에 “20만 원”
+    input = `<input type="text" inputmode="decimal" autocomplete="off" data-num ${f.won ? 'data-won' : ''} ${attrs} value="${esc(fmtNum(f.value ?? ''))}">`
+      + (f.won ? `<small class="num-hint">${korWon(f.value)}</small>` : '');
   } else {
-    const extra = f.type === 'number' ? 'inputmode="decimal" step="any" min="0"' : '';
-    input = `<input type="${f.type || 'text'}" ${attrs} ${extra} value="${v}" ${f.list ? `list="${f.name}-list"` : ''}>`;
+    input = `<input type="${f.type || 'text'}" ${attrs} value="${v}" ${f.list ? `list="${f.name}-list"` : ''}>`;
     if (f.list) input += `<datalist id="${f.name}-list">${f.list.map((o) => `<option value="${esc(o)}">`).join('')}</datalist>`;
   }
   return `<label class="field"><span>${esc(f.label)}</span>${input}</label>`;
@@ -559,6 +593,7 @@ $('#modalForm').addEventListener('submit', (e) => {
   if (!modalHandlers.onSave) return modal.close();
   const data = Object.fromEntries(new FormData(e.target).entries());
   for (const k in data) data[k] = data[k].trim();
+  e.target.querySelectorAll('input[data-num]').forEach((el) => { if (el.name in data) data[el.name] = unNum(data[el.name]); });
   if (modalHandlers.onSave(data) === false) return;
   modal.close();
   save();
@@ -2568,7 +2603,7 @@ function renderBudget(trip) {
     <div class="card calc">
       <div class="row"><b>💱 계산기</b><span class="spacer"></span><span class="muted small">${money(1, cur)} = ${rate.toLocaleString('ko-KR')}원</span></div>
       <div class="calc-row">
-        <input id="calcIn" type="number" inputmode="decimal" step="any" min="0" placeholder="${cur} 금액" value="${calcValue}">
+        <input id="calcIn" type="text" inputmode="decimal" autocomplete="off" data-num placeholder="${cur} 금액" value="${fmtNum(calcValue)}">
         <span class="muted">≈</span><b id="calcOut" class="num">${won((Number(calcValue) || 0) * rate)}</b>
       </div>
       <button class="btn sm primary" data-act="calc-add">이 금액 지출에 추가</button>
@@ -2639,7 +2674,7 @@ function planForm(trip) {
     fields: [
       ...(foreign ? [{ name: 'rate', label: `환율: 1 ${trip.currency} = ?원 (내가 환전한 환율을 넣으면 고정, 비우면 자동)`, type: 'number', value: rateAuto ? '' : rate,
         placeholder: rateAuto ? `자동 (지금 ${rate}원)` : '자동' }] : []),
-      ...CATS.map((k) => ({ name: 'p_' + k, label: k + ' 예산', type: 'number', value: plan[k] || '' })),
+      ...CATS.map((k) => ({ name: 'p_' + k, label: k + ' 예산', type: 'number', won: true, value: plan[k] || '' })),
     ],
     onSave: (d) => {
       if (foreign) {
@@ -3611,7 +3646,7 @@ $('#view').addEventListener('click', (ev) => {
     case 'calc-add': {
       if (!(Number(calcValue) > 0)) { toast('금액을 먼저 입력하세요'); break; }
       expForm(ft, null);
-      $('#modalForm').amount.value = calcValue; // 통화는 기본이 여행 통화
+      $('#modalForm').amount.value = fmtNum(calcValue); // 통화는 기본이 여행 통화
       calcValue = '';
       break;
     }
@@ -3630,7 +3665,7 @@ $('#view').addEventListener('click', (ev) => {
 let calcValue = ''; // 계산기 입력 (화면을 다시 그려도 유지)
 $('#view').addEventListener('input', (ev) => {
   if (ev.target.id === 'calcIn') {
-    calcValue = ev.target.value;
+    calcValue = unNum(ev.target.value);
     $('#calcOut').textContent = won((Number(calcValue) || 0) * focusTrip().budget.rate);
   }
 });
