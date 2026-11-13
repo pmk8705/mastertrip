@@ -203,12 +203,16 @@ function xlParse(wb, fallbackYear) {
 
 /* ---------- 앱 데이터와 맞춰 보기: 같은 항목 찾기 ---------- */
 const xlKey = (s) => xlNorm(s).toLowerCase().replace(/[()·,.\-→>~/]/g, '');
-// rows의 각 줄에 같은 앱 항목을 짝지음: ID가 같으면 그것, 없으면 이름이 같은 것(날짜까지 같은 것 먼저). 한 앱 항목은 한 번만.
-function xlPair(rows, list, title, date) {
+// rows의 각 줄에 같은 앱 항목을 짝지음. 한 앱 항목은 한 번만.
+// 1차: ID가 같은 것 → 이름이 같은 것(날짜까지 같은 것 먼저). 모든 줄을 1차로 먼저 짝지어서, 이름이 그대로인 줄이 우선.
+// 2차(fuzzy가 있을 때): 남은 줄은 이름이 바뀐 같은 항목일 수 있음 → fuzzy(r, o)가 점수를 주는 남은 앱 항목 중 가장 높은 것.
+//   이렇게 짝지은 줄은 r.renamed = 원래 이름 (미리보기에서 "이름이 바뀐 것 같아요"로 보여 줌)
+function xlPair(rows, list, title, date, fuzzy) {
   const used = new Set();
   const byId = new Map(list.map((o) => [o.id, o]));
   const pick = (cands) => cands.find((o) => !used.has(o));
   for (const r of rows) {
+    r.renamed = '';
     let o = r.xid && byId.get(r.xid);
     if (!o || used.has(o)) {
       const same = list.filter((x) => xlKey(title(x)) === xlKey(r.title || r.text));
@@ -217,15 +221,38 @@ function xlPair(rows, list, title, date) {
     r.match = o || null;
     if (o) used.add(o);
   }
+  if (fuzzy) {
+    for (const r of rows) {
+      if (r.match) continue;
+      let best = null, top = 0;
+      for (const o of list) {
+        if (used.has(o)) continue;
+        const sc = fuzzy(r, o);
+        if (sc > top) { top = sc; best = o; }
+      }
+      if (best) { r.match = best; r.renamed = title(best); used.add(best); }
+    }
+  }
   return list.filter((o) => !used.has(o)); // 엑셀에 없는 앱 항목
 }
+// 이름이 바뀐 일정 알아보기: 같은 날짜 + (같은 장소 3점, 같은 시각 2점, 같은 분류 1점). 장소나 시각 중 하나는 같아야 함
+const xlSameItem = (dateOf) => (r, o) => {
+  if (dateOf(o) !== r.date) return 0;
+  const place = r.place && o.place && xlKey(r.place) === xlKey(o.place);
+  const time = /^\d{2}:\d{2}$/.test(r.time) && r.time === o.time;
+  if (!place && !time) return 0;
+  return (place ? 3 : 0) + (time ? 2 : 0) + (r.cat === o.cat ? 1 : 0);
+};
+// 이름이 바뀐 예약: 같은 종류 + 같은 날짜(+ 끝 날짜까지 같으면 더 확실)
+const xlSameBooking = (r, o) => (r.type === o.type && r.date && r.date === o.date ? 2 + (r.end && r.end === o.end ? 1 : 0) : 0);
 
-function xlPlan(trip, P) {
-  // 고를 때마다(지금 여행/새 여행) 다시 짝지음. 새 여행이면 모두 '새로'
+function xlPlan(trip, P, renames = true) {
+  // 고를 때마다(지금 여행/새 여행) 다시 짝지음. 새 여행이면 모두 '새로'. renames면 이름이 바뀐 것도 같은 항목으로
   const dates = new Map();
   if (trip) for (const d of trip.days) for (const it of d.items) dates.set(it, d.date);
-  const pairItems = xlPair(P.items, [...dates.keys()], (x) => x.title, (x) => dates.get(x));
-  const pairBooks = xlPair(P.bookings, trip ? trip.bookings : [], (x) => x.title, (x) => x.date);
+  const dateOf = (x) => dates.get(x);
+  const pairItems = xlPair(P.items, [...dates.keys()], (x) => x.title, dateOf, renames && xlSameItem(dateOf));
+  const pairBooks = xlPair(P.bookings, trip ? trip.bookings : [], (x) => x.title, (x) => x.date, renames && xlSameBooking);
   const pairChecks = xlPair(P.checks, trip ? trip.checklist : [], (x) => x.text, null);
   const changed = (r, o, keys) => keys.some((k) => String(r[k] ?? '') !== String(o[k] ?? ''));
   const IK = ['title', 'time', 'dur', 'place', 'cat', 'memo', 'cost', 'ticketUrl', 'link'];
@@ -237,6 +264,7 @@ function xlPlan(trip, P) {
     return c;
   };
   return {
+    renamed: [...P.items, ...P.bookings].filter((r) => r.renamed).map((r) => [r.renamed, r.title]),
     items: count(P.items, (r) => changed(r, r.match, IK) || dayOf(r.match) !== r.date),
     extraItems: pairItems,
     books: count(P.bookings, (r) => changed(r, r.match, BK) || (r.code && r.code !== r.match.code) || (r.status && r.status !== r.match.status)),
@@ -257,15 +285,21 @@ function excelPreview(wb, fileName) {
   const budgetLine = CATS.map((k) => [k, sum(k)]).filter(([, v]) => v).map(([k, v]) => `${k} ${korWon(v).replace(' 원', '')}`).join(' · ');
   const dates = P.items.map((r) => r.date).sort();
 
-  const draw = (target) => {
+  const draw = (target, renames = true) => {
     const trip = target === 'new' ? null : cur;
-    const pl = xlPlan(trip, P);
+    const pl = xlPlan(trip, P, renames);
+    // 이름만 바뀐 것 같은 일정·예약 (같은 날 + 같은 장소·시각): 같은 항목으로 보면 위치·사진·바우처가 그대로 남는다
+    const ren = xlPlan(trip, P, true).renamed;
+    if (!renames) xlPlan(trip, P, false); // 짝을 다시 '이름만'으로 되돌려 둠
+    const renBox = trip && ren.length ? `
+      <label class="xl-opt"><input type="checkbox" name="renames" ${renames ? 'checked' : ''}> 이름이 바뀐 것 같아요 ${ren.length}개 — 같은 일정으로 보기 (위치·사진·바우처 유지)
+        <span class="muted small">${ren.slice(0, 4).map(([a, b]) => `${esc(a)} → <b>${esc(b)}</b>`).join('<br>')}${ren.length > 4 ? `<br>외 ${ren.length - 4}개` : ''}</span></label>` : '';
     const c = (o) => [o.add && `새로 ${o.add}`, o.upd && `바뀜 ${o.upd}`, o.same && `그대로 ${o.same}`].filter(Boolean).join(' · ') || '없음';
     const names = (list, f) => list.slice(0, 4).map((o) => esc(f(o))).join(', ') + (list.length > 4 ? ` 외 ${list.length - 4}개` : '');
     const extra = (list, key, label, f, on) => (trip && list.length ? `
       <label class="xl-opt"><input type="checkbox" name="${key}" ${on ? 'checked' : ''}> 엑셀에 없는 앱 ${label} ${list.length}개 지우기
         <span class="muted small">${names(list, f)}</span></label>` : '');
-    return `
+    return `${renBox}
       <div class="xl-row"><b>📅 일정</b> <span>${P.items.length}줄${dates.length ? ` · ${fmtDate(dates[0]).slice(3)}~${fmtDate(dates[dates.length - 1]).slice(3)}` : ''}</span><span class="muted small">${c(pl.items)}</span></div>
       ${extra(pl.extraItems, 'delItems', '일정', (o) => o.title, first)}
       <div class="xl-row"><b>📄 예약</b> <span>${P.bookings.length}개</span><span class="muted small">${c(pl.books)}</span></div>
@@ -296,7 +330,9 @@ function excelPreview(wb, fileName) {
     onSave: (d) => { excelApply(cur, P, d); },
   });
   const sel = $('#xlTarget');
+  const redraw = () => { const rb = $('#xlSummary input[name=renames]'); $('#xlSummary').innerHTML = draw(sel.value, rb ? rb.checked : true); };
   sel.onchange = () => { $('#xlSummary').innerHTML = draw(sel.value); };
+  $('#xlSummary').onchange = (ev) => { if (ev.target.name === 'renames') redraw(); };
 }
 
 /* ---------- 넣기 ---------- */
@@ -357,7 +393,8 @@ function xlApplyInner(trip, P, d) {
   if (d.cities) for (const c of P.cities) { const day = dayOf(c.date); if (day) day.city = c.city; }
 
   // 일정
-  const plan = xlPlan(trip, P);
+  // 이름이 바뀐 것 같은 항목: 미리보기에서 체크를 끄지 않았으면 같은 항목으로 (체크 칸이 없었으면 해당 없음)
+  const plan = xlPlan(trip, P, d.renames !== undefined || !document.querySelector('#xlSummary input[name=renames]'));
   let added = 0, outside = 0;
   const touched = new Set();
   for (const r of P.items) {
