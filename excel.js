@@ -246,6 +246,27 @@ const xlSameItem = (dateOf) => (r, o) => {
 // 이름이 바뀐 예약: 같은 종류 + 같은 날짜(+ 끝 날짜까지 같으면 더 확실)
 const xlSameBooking = (r, o) => (r.type === o.type && r.date && r.date === o.date ? 2 + (r.end && r.end === o.end ? 1 : 0) : 0);
 
+// 엑셀이 맡는 칸 (나머지 — 위치·완료·사진·이동·예약 연결·바우처 — 는 앱이 맡음)
+const XL_IK = ['date', 'title', 'time', 'dur', 'place', 'cat', 'memo', 'cost', 'ticketUrl', 'link'];
+const XL_BK = ['title', 'type', 'date', 'end', 'time', 'memo', 'link', 'amount'];
+const XL_LABEL = { date: '날짜', title: '이름', time: '시간', dur: '소요', place: '장소', cat: '분류', memo: '메모', cost: '경비', ticketUrl: '예매 링크', link: '링크', type: '종류', end: '끝 날짜', amount: '금액' };
+// 앱에서만 고친 칸은 지킨다: 지난번 불러온 엑셀 값(o.xlBase)과 비교해서
+//   앱 = 지난번 → 엑셀대로 / 엑셀 = 지난번 → 앱 것 유지 / 둘 다 지난번과 다르고 서로도 다름 → 물어봄
+//   xlBase가 없으면(이 기능 전에 불러왔거나 앱에서 만든 항목) 엑셀대로
+function xlMerge(r, o, keys, cur, conflicts, kind) {
+  const base = o.xlBase;
+  const res = { set: {}, conflicts: [] };
+  for (const k of keys) {
+    const xv = String(r[k] ?? ''), av = String(cur(k) ?? '');
+    if (xv === av) continue;
+    if (!base) { res.set[k] = r[k]; continue; }
+    const bv = String(base[k] ?? '');
+    if (av === bv) res.set[k] = r[k];
+    else if (xv !== bv) { res.conflicts.push(k); conflicts.push({ r, k, kind, app: av, xl: xv }); }
+  }
+  return res;
+}
+
 function xlPlan(trip, P, renames = true) {
   // 고를 때마다(지금 여행/새 여행) 다시 짝지음. 새 여행이면 모두 '새로'. renames면 이름이 바뀐 것도 같은 항목으로
   const dates = new Map();
@@ -254,20 +275,22 @@ function xlPlan(trip, P, renames = true) {
   const pairItems = xlPair(P.items, [...dates.keys()], (x) => x.title, dateOf, renames && xlSameItem(dateOf));
   const pairBooks = xlPair(P.bookings, trip ? trip.bookings : [], (x) => x.title, (x) => x.date, renames && xlSameBooking);
   const pairChecks = xlPair(P.checks, trip ? trip.checklist : [], (x) => x.text, null);
-  const changed = (r, o, keys) => keys.some((k) => String(r[k] ?? '') !== String(o[k] ?? ''));
-  const IK = ['title', 'time', 'dur', 'place', 'cat', 'memo', 'cost', 'ticketUrl', 'link'];
-  const BK = ['title', 'type', 'date', 'end', 'time', 'memo', 'link', 'amount'];
-  const dayOf = (o) => trip && (trip.days.find((d) => d.items.includes(o)) || {}).date;
+  // 칸마다 합치기: 엑셀 값 · 앱 값 · 지난번 불러온 엑셀 값(xlBase)을 비교 → set(엑셀대로 바꿀 칸) / conflicts(양쪽에서 다르게 고친 칸)
+  const conflicts = [];
+  for (const r of P.items) r.merge = r.match && xlMerge(r, r.match, XL_IK, (k) => (k === 'date' ? dateOf(r.match) : r.match[k]), conflicts, '일정');
+  for (const r of P.bookings) r.merge = r.match && xlMerge(r, r.match, XL_BK, (k) => r.match[k], conflicts, '예약');
   const count = (rows, test) => {
     const c = { add: 0, upd: 0, same: 0 };
     for (const r of rows) c[!r.match ? 'add' : test(r) ? 'upd' : 'same']++;
     return c;
   };
+  const touchedBy = (r) => Object.keys(r.merge.set).length || r.merge.conflicts.length;
   return {
+    conflicts,
     renamed: [...P.items, ...P.bookings].filter((r) => r.renamed).map((r) => [r.renamed, r.title]),
-    items: count(P.items, (r) => changed(r, r.match, IK) || dayOf(r.match) !== r.date),
+    items: count(P.items, touchedBy),
     extraItems: pairItems,
-    books: count(P.bookings, (r) => changed(r, r.match, BK) || (r.code && r.code !== r.match.code) || (r.status && r.status !== r.match.status)),
+    books: count(P.bookings, (r) => touchedBy(r) || (r.code && r.code !== r.match.code) || (r.status && r.status !== r.match.status)),
     extraBooks: pairBooks,
     checks: count(P.checks, (r) => r.text !== r.match.text || r.group !== r.match.group || (r.done && !r.match.done)),
     extraChecks: pairChecks,
@@ -291,6 +314,12 @@ function excelPreview(wb, fileName) {
     // 이름만 바뀐 것 같은 일정·예약 (같은 날 + 같은 장소·시각): 같은 항목으로 보면 위치·사진·바우처가 그대로 남는다
     const ren = xlPlan(trip, P, true).renamed;
     if (!renames) xlPlan(trip, P, false); // 짝을 다시 '이름만'으로 되돌려 둠
+    const cfBox = pl.conflicts.length ? `
+      <div class="xl-conflict"><b>⚠ 앱과 엑셀에서 다르게 고친 칸 ${pl.conflicts.length}개</b>
+        <span class="muted small">앱에서만 고친 칸은 알아서 지켜요. 아래는 양쪽에서 고쳐서 골라 주셔야 해요.</span>
+        ${pl.conflicts.map((c, i) => `<div class="xl-cf"><div class="small"><b>${esc(c.r.title)}</b> · ${XL_LABEL[c.k]}</div>
+          <label><input type="radio" name="cf${i}" value="app" checked> 앱: ${esc(c.app || '(빈칸)')}</label>
+          <label><input type="radio" name="cf${i}" value="xl"> 엑셀: ${esc(c.xl || '(빈칸)')}</label></div>`).join('')}</div>` : '';
     const renBox = trip && ren.length ? `
       <label class="xl-opt"><input type="checkbox" name="renames" ${renames ? 'checked' : ''}> 이름이 바뀐 것 같아요 ${ren.length}개 — 같은 일정으로 보기 (위치·사진·바우처 유지)
         <span class="muted small">${ren.slice(0, 4).map(([a, b]) => `${esc(a)} → <b>${esc(b)}</b>`).join('<br>')}${ren.length > 4 ? `<br>외 ${ren.length - 4}개` : ''}</span></label>` : '';
@@ -299,7 +328,7 @@ function excelPreview(wb, fileName) {
     const extra = (list, key, label, f, on) => (trip && list.length ? `
       <label class="xl-opt"><input type="checkbox" name="${key}" ${on ? 'checked' : ''}> 엑셀에 없는 앱 ${label} ${list.length}개 지우기
         <span class="muted small">${names(list, f)}</span></label>` : '');
-    return `${renBox}
+    return `${renBox}${cfBox}
       <div class="xl-row"><b>📅 일정</b> <span>${P.items.length}줄${dates.length ? ` · ${fmtDate(dates[0]).slice(3)}~${fmtDate(dates[dates.length - 1]).slice(3)}` : ''}</span><span class="muted small">${c(pl.items)}</span></div>
       ${extra(pl.extraItems, 'delItems', '일정', (o) => o.title, first)}
       <div class="xl-row"><b>📄 예약</b> <span>${P.bookings.length}개</span><span class="muted small">${c(pl.books)}</span></div>
@@ -397,23 +426,32 @@ function xlApplyInner(trip, P, d) {
   const plan = xlPlan(trip, P, d.renames !== undefined || !document.querySelector('#xlSummary input[name=renames]'));
   let added = 0, outside = 0;
   const touched = new Set();
+  // 양쪽에서 고친 칸: 미리보기에서 고른 대로 (기본은 앱 것 유지)
+  plan.conflicts.forEach((c, i) => { if (d['cf' + i] === 'xl') c.r.merge.set[c.k] = c.r[c.k]; });
+  const base = (r, keys) => Object.fromEntries(keys.map((k) => [k, r[k] ?? '']));
   for (const r of P.items) {
-    const day = dayOf(r.date);
-    if (!day) { outside++; continue; }
     let it = r.match;
-    if (it) {
-      const from = trip.days.find((x) => x.items.includes(it));
-      if (from && from !== day) { from.items = from.items.filter((x) => x !== it); day.items.push(it); touched.add(from); delete it.move; }
-      if (xlKey(it.place) !== xlKey(r.place)) { delete it.lat; delete it.lng; delete it.geo; } // 장소가 바뀌면 위치 다시 찾기
-    } else {
+    const set = it ? r.merge.set : Object.fromEntries(XL_IK.map((k) => [k, r[k]]));
+    const date = 'date' in set ? set.date : null;
+    let day = it ? trip.days.find((x) => x.items.includes(it)) : dayOf(r.date);
+    if (!it) {
+      if (!day) { outside++; continue; }
       it = { id: uid(), done: false, bookingId: '' };
       day.items.push(it);
       added++;
+    } else if (date && date !== (day && day.date)) {
+      const to = dayOf(date);
+      if (!to) outside++;
+      else { if (day) { day.items = day.items.filter((x) => x !== it); touched.add(day); } to.items.push(it); day = to; delete it.move; }
     }
-    Object.assign(it, { title: r.title, time: r.time, dur: r.dur, place: r.place, cat: r.cat, memo: r.memo, cost: r.cost, ticketUrl: r.ticketUrl });
-    if (r.link) it.link = r.link; else delete it.link;
+    if ('place' in set && xlKey(it.place) !== xlKey(set.place)) { delete it.lat; delete it.lng; delete it.geo; } // 장소가 바뀌면 위치 다시 찾기
+    for (const k of Object.keys(set)) {
+      if (k === 'date') continue;
+      if (k === 'link') { if (set.link) it.link = set.link; else delete it.link; } else it[k] = set[k];
+    }
+    it.xlBase = base(r, XL_IK); // 이번에 불러온 엑셀 값 (다음 불러오기 때 앱에서 고친 칸을 알아보는 기준)
     it._xo = r.order;
-    touched.add(day);
+    if (day) touched.add(day);
   }
   if (d.delItems) for (const it of plan.extraItems) {
     for (const day of trip.days) if (day.items.includes(it)) { day.items = day.items.filter((x) => x !== it); touched.add(day); }
@@ -432,7 +470,8 @@ function xlApplyInner(trip, P, d) {
   for (const r of P.bookings) {
     let b = r.match;
     if (!b) { b = { id: uid(), code: '', vouchers: [] }; trip.bookings.push(b); }
-    Object.assign(b, { type: r.type, title: r.title, date: r.date, end: r.end, time: r.time, amount: r.amount, memo: r.memo, link: r.link });
+    Object.assign(b, r.match ? r.merge.set : Object.fromEntries(XL_BK.map((k) => [k, r[k]])));
+    b.xlBase = base(r, XL_BK);
     if (r.code) b.code = r.code;
     if (r.status) b.status = r.status;
   }

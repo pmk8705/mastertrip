@@ -853,3 +853,7 @@ hr.soft { border: 0; border-top: 1px solid var(--line); margin: 8px 0 10px; }
 .xl-opt .muted { display: block; margin: 2px 0 0 24px; }
 .xl-warn { margin: 10px 0; font-size: 13px; }
 .xl-warn ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+.xl-conflict { margin: 10px 0; padding: 10px 12px; border-radius: 12px; background: var(--accent-soft); }
+.xl-conflict > .muted { display: block; margin: 2px 0 6px; }
+.xl-cf { padding: 6px 0; border-top: 1px solid var(--line); }
+.xl-cf label { display: block; font-size: 14px; margin-top: 3px; }
