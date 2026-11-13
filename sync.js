@@ -51,6 +51,7 @@ async function syncBoot() {
 /* ---------- 여행 ↔ 항목 (서버 trip_items 한 줄씩) ---------- */
 // meta: 여행 정보, day: 날짜 정보(도시·한 줄 평), item: 일정, check·expense·booking·contact
 // 폰에만 두는 것: 기록 사진(day.photos). 비상 서류·스크랩은 여행 밖이라 처음부터 안 들어옴.
+// 표지·바우처·일정 사진 파일은 아래 syncMedia가 Storage로 (여기 항목에는 파일 id만 들어감)
 const ARRAY_TYPES = [['checklist', 'check'], ['expenses', 'expense'], ['bookings', 'booking'], ['contacts', 'contact']];
 // 순서 번호: 전에 쓰던 번호(st.rows[id].o)를 최대한 그대로 두고, 옮기거나 새로 넣은 것만 사이 값(예: 1.5)을 준다.
 // 하나를 지우거나 끼워 넣어도 나머지 항목은 '바뀐 것'이 아니게 → 덜 보내고, 다른 항목을 고친 배우자와 가짜 충돌이 안 난다.
@@ -290,6 +291,83 @@ async function syncTrip(tripId, store, report) {
   saveSyncStore(store);
 }
 
+/* ---------- 4단계: 사진·바우처 파일 (Storage trip-media/{여행id}/...) ---------- */
+// 올리는 것: 표지 사진(c-버전), 예약 바우처(v-id), 일정 사진(p-id). 기록 탭 하루 사진·비상 서류는 폰에만.
+// st.files = { 경로: 1 } — 서버에 있다고 아는 파일. 여행에서 더는 안 쓰는 파일은 서버에서 지운다.
+const MEDIA_BUCKET = 'trip-media';
+function mediaRefs(t) {
+  const refs = [];
+  if (t.cover) {
+    refs.push({
+      path: `${t.id}/c-${t.cover}`,
+      get: () => (coverVers()[t.id] === t.cover ? media.get(t.id) : null),
+      put: (b) => setCover(t.id, b, t.cover),
+    });
+  }
+  for (const b of t.bookings || []) {
+    for (const v of b.vouchers || []) refs.push({ path: `${t.id}/v-${v.id}`, get: () => voucherDb.get(v.id), put: (blob) => voucherDb.set(v.id, blob) });
+  }
+  for (const d of t.days || []) {
+    for (const it of d.items || []) {
+      if (!it.photo) continue;
+      const id = it.photo;
+      refs.push({
+        path: `${t.id}/p-${id}`,
+        get: () => photoDb.get(id),
+        put: async (blob) => { await photoDb.set(id, blob); if (photoUrls[id]) URL.revokeObjectURL(photoUrls[id]); photoUrls[id] = URL.createObjectURL(blob); },
+      });
+    }
+  }
+  return refs;
+}
+// 예전부터 이 폰에 있던 표지 사진(버전 표시 없음)에 버전을 붙여서 올릴 수 있게 한다
+function adoptCover(t) {
+  if (t.cover === undefined && coverUrls[t.id]) {
+    t.cover = uid();
+    setCoverVer(t.id, t.cover);
+    save();
+  }
+}
+async function syncMedia(tripId, store, report) {
+  const t = getTrip(tripId);
+  const st = store.trips[tripId];
+  if (!t || !st) return;
+  if (blobHold) return syncSoon(8000); // 지우기 되돌리기를 기다리는 중
+  st.files = st.files || {};
+  const bucket = sb.storage.from(MEDIA_BUCKET);
+  const refs = mediaRefs(t);
+  let up = 0, down = 0, fail = 0;
+  for (const r of refs) {
+    try {
+      const local = await r.get();
+      if (local && !st.files[r.path]) {
+        const { error } = await bucket.upload(r.path, local, { upsert: true, contentType: local.type || 'application/octet-stream' });
+        if (error) throw error;
+        st.files[r.path] = 1; up++;
+      } else if (!local) {
+        const { data, error } = await bucket.download(r.path);
+        if (error || !data) continue; // 배우자 폰이 아직 안 올림 → 다음에
+        await r.put(data);
+        st.files[r.path] = 1; down++;
+      }
+      saveSyncStore(store);
+    } catch (e) { console.warn('파일 맞추기 실패', r.path, e); fail++; }
+  }
+  // 여행에서 빠진 파일(사진을 바꾸거나 바우처·일정을 지움)은 서버에서도 지운다
+  const live = new Set(refs.map((r) => r.path));
+  const gone = Object.keys(st.files).filter((p) => !live.has(p));
+  if (gone.length) {
+    const { error } = await bucket.remove(gone);
+    if (!error) { for (const p of gone) delete st.files[p]; saveSyncStore(store); }
+  }
+  // 배우자가 표지 사진을 뺐으면 이 폰에서도 뺀다
+  let dropped = false;
+  if (t.cover === '' && coverVers()[t.id]) { await removeCover(t.id); dropped = true; }
+  if (up || down) report.push(`🖼 ${t.title}: 파일 올림 ${up} · 받음 ${down}`);
+  if (fail) report.push(`⚠ ${t.title}: 파일 ${fail}개를 맞추지 못했어요 (다음에 다시)`);
+  if (down || dropped) render();
+}
+
 /* ---------- 전체 맞추기 ---------- */
 // 로그인 + '올리기'를 한 번 한 뒤(store.on)부터 자동: 앱을 열 때·돌아올 때·인터넷이 다시 될 때·고친 뒤 4초
 let syncAgain = false;
@@ -335,13 +413,16 @@ async function syncAll({ manual = false } = {}) {
         // 초대로 들어온 여행이 이 폰에도 있음(예전에 파일로 받음): 한 번 묻는다
         if (!confirm(`“${trip.title}” 여행이 서버에도 있어요.\n\n[확인] 서버(배우자) 것으로 맞추기 — 이 폰과 다른 곳은 하나씩 물어봐요\n[취소] 나중에`)) continue;
       }
+      adoptCover(trip);
       await syncTrip(trip.id, store, report);
+      await syncMedia(trip.id, store, report);
       saveSyncStore(store);
     }
     // 서버에만 있는 여행 (초대로 들어온 여행) → 받아 오기
     for (const [id, s] of onServer) {
       if (s.is_deleted || getTrip(id)) continue;
       await syncTrip(id, store, report);
+      await syncMedia(id, store, report);
     }
     saveSyncStore(store);
     syncMsg = report.join('\n') || `맞춤 · ${whenStr(new Date().toISOString())}`;

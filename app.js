@@ -479,19 +479,30 @@ async function loadCovers() {
     keys.forEach((k, i) => { coverUrls[k] = URL.createObjectURL(vals[i]); });
   } catch (e) { console.warn('사진 불러오기 실패', e); }
 }
-async function setCover(id, blob) {
+// 표지 사진 버전: 여행 정보의 trip.cover(사진을 바꿀 때마다 새 글자)와 이 폰에 있는 사진이 같은 것인지 (함께 쓰기에서 씀)
+const COVER_VER_KEY = 'mastertrip-coverver';
+const coverVers = () => { try { return JSON.parse(localStorage.getItem(COVER_VER_KEY) || '{}'); } catch (e) { return {}; } };
+function setCoverVer(id, ver) {
+  const m = coverVers();
+  if (ver) m[id] = ver; else delete m[id];
+  try { localStorage.setItem(COVER_VER_KEY, JSON.stringify(m)); } catch (e) { /* 저장 못 해도 동작엔 문제없음 */ }
+}
+async function setCover(id, blob, ver) {
   await media.set(id, blob);
+  setCoverVer(id, ver || (getTrip(id) || {}).cover);
   if (coverUrls[id]) URL.revokeObjectURL(coverUrls[id]);
   coverUrls[id] = URL.createObjectURL(blob);
 }
 async function removeCover(id) {
   if (blobHold) return void blobHold.push(() => removeCover(id));
   await media.del(id);
+  setCoverVer(id, null);
   if (coverUrls[id]) URL.revokeObjectURL(coverUrls[id]);
   delete coverUrls[id];
 }
 async function clearCovers() {
   await media.clear();
+  try { localStorage.removeItem(COVER_VER_KEY); } catch (e) { /* 무시 */ }
   Object.keys(coverUrls).forEach((k) => { URL.revokeObjectURL(coverUrls[k]); delete coverUrls[k]; });
 }
 
@@ -1579,9 +1590,14 @@ function wireRangeCal() {
 function applyCoverChoice(id) {
   const file = $('#coverInput') && $('#coverInput').files[0];
   const remove = $('#coverRemove') && $('#coverRemove').checked;
+  const t = getTrip(id);
   if (file) {
-    shrinkImage(file).then((b) => setCover(id, b)).then(render).catch(() => toast('사진을 불러오지 못했어요'));
+    const ver = uid(); // 사진을 바꿀 때마다 새 이름 → 배우자 폰이 '새 사진'을 알아본다
+    if (t) t.cover = ver;
+    shrinkImage(file).then((b) => setCover(id, b, ver)).then(() => { render(); if (typeof syncSoon === 'function') syncSoon(); })
+      .catch(() => toast('사진을 불러오지 못했어요'));
   } else if (remove) {
+    if (t) t.cover = '';
     removeCover(id).then(render);
   }
 }
