@@ -435,9 +435,9 @@ function xlApplyInner(trip, P, d) {
   trip.xlAt = todayStr();
   autoLinkBookings(trip);
   normalizeTrip(trip);
-  const parts = [`일정 ${P.items.length - outside}개`, added && `새로 ${added}`, `예약 ${P.bookings.length}개`, tipN && `스크랩 ${tipN}`].filter(Boolean);
-  if (outside) parts.push(`기간 밖 ${outside}개는 뺐어요`);
-  return { trip, msg: `엑셀을 불러왔어요 · ${parts.join(' · ')}` };
+  // 알림은 짧게 (길면 [되돌리기] 버튼이 화면 밖으로 밀림)
+  const msg = outside ? `불러왔어요 · 기간 밖 일정 ${outside}개는 뺐어요` : `불러왔어요 · 일정 ${P.items.length} · 예약 ${P.bookings.length}`;
+  return { trip, msg };
 }
 
 /* ---------- 앱 → 엑셀 내보내기 (같은 양식, ID 채움) ---------- */
