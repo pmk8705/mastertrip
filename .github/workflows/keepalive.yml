@@ -1,11 +1,11 @@
-# Supabase 무료 요금제는 1주일 동안 안 쓰면 잠든다 → 3일마다 서버를 살짝 깨운다.
-# 부르는 함수 keepalive()는 서버 시각만 돌려준다 (supabase/schema.sql 맨 아래).
+# Supabase 무료 요금제는 1주일 동안 실제 데이터베이스 사용이 부족하면 잠든다 → 매일 서버를 깨운다.
+# 부르는 함수 keepalive()는 작은 표 keepalive_log 한 줄을 고쳐 쓴다 (supabase/schema.sql 맨 아래). 여행 데이터는 건드리지 않음.
 # 공개 키(publishable)만 쓴다. 비밀 키는 여기 넣지 않는다.
 name: Supabase 깨우기
 
 on:
   schedule:
-    - cron: '17 3 */3 * *' # 3일마다 03:17 UTC (한국 12:17)
+    - cron: '17 3 * * *' # 매일 03:17 UTC (한국 12:17)
   workflow_dispatch: # Actions 화면에서 직접 실행도 가능
 
 jobs:

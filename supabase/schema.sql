@@ -223,10 +223,23 @@ create policy "trip-media: members replace" on storage.objects for update to aut
 create policy "trip-media: members delete" on storage.objects for delete to authenticated
   using (bucket_id = 'trip-media' and public.is_trip_member((storage.foldername(name))[1]));
 
--- ───────────── 잠들지 않게 (2026-11-13 추가) ─────────────
--- 무료 요금제는 1주일 동안 안 쓰면 잠든다 → GitHub Actions(.github/workflows/keepalive.yml)가 3일마다 부른다.
--- 데이터는 하나도 읽지 않고 서버 시각만 돌려준다 (로그인 안 한 사람도 부를 수 있음).
+-- ───────────── 잠들지 않게 (2026-11-13 추가, 2026-11-25 바꿈) ─────────────
+-- 무료 요금제는 1주일 동안 '실제 데이터베이스 사용'이 부족하면 잠든다.
+-- 시각만 돌려주던 처음 방식은 사용으로 쳐 주지 않아 11/22에 잠들었다 → 작은 표에 한 줄을 고쳐 쓴다(진짜 쓰기).
+-- GitHub Actions(.github/workflows/keepalive.yml)가 매일 부른다. 여행 데이터는 읽지도 쓰지도 않는다.
+create table if not exists public.keepalive_log (
+  id int primary key,
+  at timestamptz not null default now(),
+  n bigint not null default 0
+);
+alter table public.keepalive_log enable row level security; -- 규칙 없음 = 직접 접근 불가 (아래 함수로만)
+
 create or replace function public.keepalive() returns timestamptz
-language sql stable set search_path = public as $$ select now() $$;
+language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.keepalive_log (id, at, n) values (1, now(), 1)
+  on conflict (id) do update set at = now(), n = public.keepalive_log.n + 1;
+  return now();
+end $$;
 revoke execute on function public.keepalive() from public;
 grant execute on function public.keepalive() to anon, authenticated;
